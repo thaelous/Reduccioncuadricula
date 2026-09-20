@@ -2034,12 +2034,8 @@
     /* =========================================================
        1. CONFIGURACIÓN EDITABLE DE FIREBASE (RTDB & CLOUD FIRESTORE)
        ========================================================= */
-    const _fbKeyPart1 = "AIza";
-    const _fbKeyPart2 = "SyACxGWJBhaeKo4lz015Lz691L4gpHLLHRtM";
-    const _fbKey = _fbKeyPart1 + _fbKeyPart2;
-
     const firebaseConfig = {
-      apiKey: _fbKey,
+      apiKey: "AIzaSyACxGWJBhaeKo4lz015Lz691L4gpHLLHRtM",
       authDomain: "reduccion-cuadricula-3f6b0.firebaseapp.com",
       databaseURL: "https://reduccion-cuadricula-3f6b0-default-rtdb.firebaseio.com",
       projectId: "reduccion-cuadricula-3f6b0",
@@ -2189,11 +2185,14 @@
       });
     }
 
-    // Auto-formato en mayúsculas y sin espacios para código de activación
+    // Auto-formato en mayúsculas y sin espacios accidentales para código de activación
     if (inputRedeemCode) {
       inputRedeemCode.addEventListener('input', (e) => {
         e.target.value = e.target.value.replace(/\s+/g, '').toUpperCase();
         clearAuthError();
+      });
+      inputRedeemCode.addEventListener('blur', (e) => {
+        e.target.value = e.target.value.trim().toUpperCase();
       });
     }
 
@@ -2255,7 +2254,7 @@
     if (formRedeemStepA) {
       formRedeemStepA.addEventListener('submit', async (e) => {
         e.preventDefault();
-        const code = (inputRedeemCode.value || '').replace(/\s+/g, '').toUpperCase();
+        const code = (inputRedeemCode.value || '').trim().toUpperCase();
 
         if (!code) {
           showAuthError('Por favor ingresa un código de activación.');

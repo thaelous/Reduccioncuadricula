@@ -16,17 +16,14 @@ import {
   getDocs,
 } from 'firebase/firestore';
 
-// Clave dividida en 2 partes para evitar que el analizador de secretos de Netlify cancele el build
-const _apiKeyPart1 = 'AIza';
-const _apiKeyPart2 = 'SyCaQWffSlgpxCOdHTJWx7sdD2jHjvc7drQ';
-
 export const firebaseConfig = {
-  apiKey: _apiKeyPart1 + _apiKeyPart2,
-  authDomain: 'apps-educativas-suscripciones.firebaseapp.com',
-  projectId: 'apps-educativas-suscripciones',
-  storageBucket: 'apps-educativas-suscripciones.firebasestorage.app',
-  messagingSenderId: '266465203983',
-  appId: '1:266465203983:web:83ba940bc2d180898b507a'
+  apiKey: "AIzaSyACxGWJBhaeKo4lz015Lz691L4gpHLLHRtM",
+  authDomain: "reduccion-cuadricula-3f6b0.firebaseapp.com",
+  databaseURL: "https://reduccion-cuadricula-3f6b0-default-rtdb.firebaseio.com",
+  projectId: "reduccion-cuadricula-3f6b0",
+  storageBucket: "reduccion-cuadricula-3f6b0.firebasestorage.app",
+  messagingSenderId: "143509305132",
+  appId: "1:143509305132:web:8c8faaa929b39cda1cde89"
 };
 
 // Inicialización de Firebase
@@ -96,8 +93,8 @@ export async function validateLicenseCode(rawCode: string): Promise<{
   message?: string;
   session?: AuthSessionData;
 }> {
-  // Convertir automáticamente a mayúsculas y quitar espacios en blanco
-  const cleanCode = (rawCode || '').replace(/\s+/g, '').toUpperCase();
+  // Convertir automáticamente a mayúsculas y quitar espacios en blanco accidentales
+  const cleanCode = (rawCode || '').trim().toUpperCase();
 
   if (!cleanCode) {
     return {

@@ -52,7 +52,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
   // PASO 1: Validar el código sin quemarlo todavía
   const handleVerifyCode = async (e: React.FormEvent) => {
     e.preventDefault();
-    const sanitized = licenseCode.replace(/\s+/g, '').toUpperCase();
+    const sanitized = licenseCode.trim().toUpperCase();
     if (!sanitized) {
       setErrorMessage('Por favor, ingresa tu código de activación.');
       return;
@@ -358,8 +358,11 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
                     type="text"
                     value={licenseCode}
                     onChange={(e) => {
-                      setLicenseCode(e.target.value.replace(/\s+/g, '').toUpperCase());
+                      setLicenseCode(e.target.value.toUpperCase());
                       if (errorMessage) setErrorMessage(null);
+                    }}
+                    onBlur={() => {
+                      setLicenseCode((prev) => prev.trim().toUpperCase());
                     }}
                     placeholder="SUB-XXXXXX"
                     autoFocus
