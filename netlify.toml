@@ -1,0 +1,24 @@
+# Configuración para despliegue en Netlify
+[build]
+  publish = "dist"
+  command = "npm run build"
+
+[build.environment]
+  # Permite que Smart Secret Scanning de Netlify reconozca el falso positivo de la clave pública del cliente Firebase
+  SECRETS_SCAN_SMART_DETECTION_OMIT_VALUES = "AIzaSyACxGWJBhaeKo4lz015Lz691L4gpHLLHRtM"
+
+# Redirecciones para archivos estáticos y SPA fallback
+[[redirects]]
+  from = "/reduccion_cuadricula.html"
+  to = "/reduccion_cuadricula.html"
+  status = 200
+
+[[redirects]]
+  from = "/reduccion_cuadricula_taller.html"
+  to = "/reduccion_cuadricula_taller.html"
+  status = 200
+
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200

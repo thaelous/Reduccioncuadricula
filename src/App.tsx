@@ -30,6 +30,7 @@ import { ProjectorView } from './components/ProjectorView';
 import { StudentHeader } from './components/StudentHeader';
 import { StudentHelpModal } from './components/StudentHelpModal';
 import { StudentFinishedModal } from './components/StudentFinishedModal';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { AuthModal } from './components/AuthModal';
 import { ActiveSessionBar } from './components/ActiveSessionBar';
 import {
@@ -157,46 +158,36 @@ export default function App() {
   // Fullscreen state
   const [isFullscreen, setIsFullscreen] = useState(false);
 
-  // Toggle Fullscreen helper
+  // Toggle Fullscreen helper (exclusivo para acción directa del usuario)
   const handleToggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch((err) => {
-        console.warn("Error requesting fullscreen:", err);
-      });
-    } else {
-      if (document.exitFullscreen) {
-        document.exitFullscreen().catch((err) => {
-          console.warn("Error exiting fullscreen:", err);
-        });
+    try {
+      if (!document.fullscreenElement) {
+        if (document.documentElement.requestFullscreen) {
+          document.documentElement.requestFullscreen().catch((err) => {
+            console.warn("Aviso de pantalla completa:", err);
+          });
+        }
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen().catch((err) => {
+            console.warn("Aviso saliendo de pantalla completa:", err);
+          });
+        }
       }
+    } catch (err) {
+      console.warn("Excepción al alternar pantalla completa:", err);
     }
   };
 
-  // Listen to fullscreen changes and auto-request on first user interaction
+  // Escuchar cambios de estado de pantalla completa
   useEffect(() => {
     const handleFullscreenChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
     };
     document.addEventListener('fullscreenchange', handleFullscreenChange);
 
-    // Activar pantalla completa al iniciar con la primera interacción del usuario
-    const handleFirstInteraction = () => {
-      if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(() => {
-          // Si el navegador o iframe bloquea el fullscreen silenciosamente, no romper la experiencia
-        });
-      }
-      window.removeEventListener('click', handleFirstInteraction);
-      window.removeEventListener('touchstart', handleFirstInteraction);
-    };
-
-    window.addEventListener('click', handleFirstInteraction, { once: true });
-    window.addEventListener('touchstart', handleFirstInteraction, { once: true });
-
     return () => {
       document.removeEventListener('fullscreenchange', handleFullscreenChange);
-      window.removeEventListener('click', handleFirstInteraction);
-      window.removeEventListener('touchstart', handleFirstInteraction);
     };
   }, []);
 
@@ -425,9 +416,6 @@ export default function App() {
   // Start from splash screen
   const handleStartGame = () => {
     setShowSplash(false);
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen().catch(() => {});
-    }
     if (!isTutorialHidden('tradicional')) {
       setIsTutorialOpen(true);
     }
@@ -591,9 +579,9 @@ export default function App() {
           ...prev.attempts,
           {
             round: prev.currentRound,
+            mode: (currentMode === 'tradicional' ? 'tradicional' : 'reduccion') as 'tradicional' | 'reduccion',
             time,
             isCorrect,
-            totalSum,
             userDigit,
             correctRoot: correctDigitalRoot,
           },
@@ -679,19 +667,27 @@ export default function App() {
     // VIEW 1: Teacher Dashboard (Control Panel & Multiplayer Lobby)
     if (userRole === 'teacher' && isTeacherDashboardOpen) {
       return (
-        <TeacherDashboard
-          config={classroomConfig}
-          currentSeed={sessionSeed}
-          onUpdateConfig={handleUpdateClassroomConfig}
-          onRegenerateSeed={() => {
-            const nextSeed = Math.floor(Math.random() * 900000) + 100000;
-            setSessionSeed(nextSeed);
-            initializeGrid(classroomConfig.rows, classroomConfig.cols, nextSeed);
+        <ErrorBoundary
+          fallbackTitle="Error al cargar el modo multijugador"
+          onReset={() => {
+            setIsTeacherDashboardOpen(false);
+            setUserRole('teacher');
           }}
-          onLaunchProjector={handleLaunchProjector}
-          onLaunchStudentView={handlePreviewAsStudent}
-          onBackToApp={() => setIsTeacherDashboardOpen(false)}
-        />
+        >
+          <TeacherDashboard
+            config={classroomConfig}
+            currentSeed={sessionSeed}
+            onUpdateConfig={handleUpdateClassroomConfig}
+            onRegenerateSeed={() => {
+              const nextSeed = Math.floor(Math.random() * 900000) + 100000;
+              setSessionSeed(nextSeed);
+              initializeGrid(classroomConfig.rows, classroomConfig.cols, nextSeed);
+            }}
+            onLaunchProjector={handleLaunchProjector}
+            onLaunchStudentView={handlePreviewAsStudent}
+            onBackToApp={() => setIsTeacherDashboardOpen(false)}
+          />
+        </ErrorBoundary>
       );
     }
 
@@ -720,45 +716,49 @@ export default function App() {
         {/* 1. Splash Screen Overlay (Teacher/Standard mode only) */}
         {!isStudentView && showSplash ? (
           <SplashIntro
-          onStart={handleStartGame}
-          onStartMultiplayer={() => {
-            window.location.href = '/reduccion_cuadricula_taller.html';
-          }}
-        />
-      ) : (
-        <>
-          {/* 2. Top Navigation Bar: Student Header vs Teacher TopNav */}
-          {isStudentView ? (
-            <StudentHeader
-              currentMode={currentMode}
-              onSelectMode={
-                classroomConfig.studentMode === 'libre'
-                  ? (mode) => handleSelectMode(mode)
-                  : undefined
-              }
-              config={classroomConfig}
-              progress={studentProgress}
-              onOpenHelp={() => setIsStudentHelpOpen(true)}
-              onResetRound={handleResetAttempt}
-              isTimerRunning={
-                currentMode === 'tradicional' ? tradTimerActive : redTimerActive
-              }
-              elapsedSeconds={currentMode === 'tradicional' ? tradTime : redTime}
-            />
-          ) : (
-            <TopNav
-              currentMode={currentMode}
-              onSelectMode={handleSelectMode}
-              gridConfig={gridConfig}
-              onOpenDimensions={() => setIsDimensionOpen(true)}
-              onOpenTutorial={() => setIsTutorialOpen(true)}
-              onOpenSplash={() => setShowSplash(true)}
-              onOpenTeacherDashboard={() => {
-                window.location.href = '/reduccion_cuadricula_taller.html';
-              }}
-              onOpenProjector={handleLaunchProjector}
-            />
-          )}
+            onStart={handleStartGame}
+            onStartMultiplayer={() => {
+              setShowSplash(false);
+              setUserRole('teacher');
+              setIsTeacherDashboardOpen(true);
+            }}
+          />
+        ) : (
+          <>
+            {/* 2. Top Navigation Bar: Student Header vs Teacher TopNav */}
+            {isStudentView ? (
+              <StudentHeader
+                currentMode={currentMode}
+                onSelectMode={
+                  classroomConfig.studentMode === 'libre'
+                    ? (mode) => handleSelectMode(mode)
+                    : undefined
+                }
+                config={classroomConfig}
+                progress={studentProgress}
+                onOpenHelp={() => setIsStudentHelpOpen(true)}
+                onResetRound={handleResetAttempt}
+                isTimerRunning={
+                  currentMode === 'tradicional' ? tradTimerActive : redTimerActive
+                }
+                elapsedSeconds={currentMode === 'tradicional' ? tradTime : redTime}
+              />
+            ) : (
+              <TopNav
+                currentMode={currentMode}
+                onSelectMode={handleSelectMode}
+                gridConfig={gridConfig}
+                onOpenDimensions={() => setIsDimensionOpen(true)}
+                onOpenTutorial={() => setIsTutorialOpen(true)}
+                onOpenSplash={() => setShowSplash(true)}
+                onOpenTeacherDashboard={() => {
+                  setShowSplash(false);
+                  setUserRole('teacher');
+                  setIsTeacherDashboardOpen(true);
+                }}
+                onOpenProjector={handleLaunchProjector}
+              />
+            )}
 
           {/* Discreet floating badge when teacher is previewing student view */}
           {isStudentView && isTeacherPreviewingStudent && (
@@ -1019,7 +1019,9 @@ export default function App() {
 
         {/* Contenedor del juego */}
         <div className="flex-1 w-full overflow-hidden relative">
-          {renderCurrentView()}
+          <ErrorBoundary fallbackTitle="Error al mostrar la vista solicitada">
+            {renderCurrentView()}
+          </ErrorBoundary>
         </div>
       </div>
     </div>

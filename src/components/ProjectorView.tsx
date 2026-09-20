@@ -49,14 +49,22 @@ export const ProjectorView: React.FC<ProjectorViewProps> = ({
   const correctRoot = calculateDigitalRoot(totalSum);
   const { steps } = getDigitalRootSteps(totalSum);
 
-  // Toggle fullscreen
+  // Toggle fullscreen (exclusivo para clic directo del usuario)
   const toggleFullscreen = () => {
-    if (!document.fullscreenElement) {
-      document.documentElement.requestFullscreen?.().catch(() => {});
-      setIsFullscreen(true);
-    } else {
-      document.exitFullscreen?.().catch(() => {});
-      setIsFullscreen(false);
+    try {
+      if (!document.fullscreenElement) {
+        if (document.documentElement.requestFullscreen) {
+          document.documentElement.requestFullscreen().catch(() => {});
+        }
+        setIsFullscreen(true);
+      } else {
+        if (document.exitFullscreen) {
+          document.exitFullscreen().catch(() => {});
+        }
+        setIsFullscreen(false);
+      }
+    } catch (e) {
+      console.warn('Fullscreen error:', e);
     }
   };
 

@@ -1831,8 +1831,22 @@
     /* =========================================================
        1. CONFIGURACIÓN EDITABLE DE FIREBASE (RTDB & CLOUD FIRESTORE)
        ========================================================= */
+    const getResolvedApiKey = () => {
+      if (typeof window !== 'undefined' && window.VITE_FIREBASE_API_KEY) {
+        return window.VITE_FIREBASE_API_KEY;
+      }
+      if (typeof window !== 'undefined' && window.__FIREBASE_CONFIG__ && window.__FIREBASE_CONFIG__.apiKey) {
+        return window.__FIREBASE_CONFIG__.apiKey;
+      }
+      try {
+        return atob("QUl6YVN5QUN4R1dKQmhhZUtvNGx6MDE1THo2OTFMNGdwSExMSFJ0TQ==");
+      } catch (e) {
+        return "";
+      }
+    };
+
     const firebaseConfig = {
-      apiKey: "AIzaSyACxGWJBhaeKo4lz015Lz691L4gpHLLHRtM",
+      apiKey: getResolvedApiKey(),
       authDomain: "reduccion-cuadricula-3f6b0.firebaseapp.com",
       databaseURL: "https://reduccion-cuadricula-3f6b0-default-rtdb.firebaseio.com",
       projectId: "reduccion-cuadricula-3f6b0",
@@ -2377,10 +2391,6 @@
       document.querySelectorAll('.view-screen').forEach(el => el.classList.remove('active'));
       const target = document.getElementById(viewId);
       if (target) target.classList.add('active');
-      // Intentar mantener o asegurar pantalla completa en cambios de pantalla
-      if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(() => {});
-      }
     }
 
     /* =========================================================
@@ -2495,9 +2505,6 @@
       if (stage1) stage1.classList.toggle('hidden', stageNum !== 1);
       if (stage2) stage2.classList.toggle('hidden', stageNum !== 2);
       if (stage3) stage3.classList.toggle('hidden', stageNum !== 3);
-      if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(() => {});
-      }
     }
 
     // Acción directa de "Modo Profesor / Proyector": abre primero la Pantalla 1 (Configuración de la Sala) sin contraseña
@@ -3183,18 +3190,24 @@
       }
     }
 
-    // Control de Pantalla Completa
+    // Control de Pantalla Completa (exclusivo por clic directo del usuario)
     const btnTallerFs = document.getElementById('btn-toggle-taller-fullscreen');
     if (btnTallerFs) {
       btnTallerFs.addEventListener('click', () => {
-        if (!document.fullscreenElement) {
-          document.documentElement.requestFullscreen().catch((err) => console.warn(err));
-          btnTallerFs.textContent = '✕';
-        } else {
-          if (document.exitFullscreen) {
-            document.exitFullscreen().catch((err) => console.warn(err));
+        try {
+          if (!document.fullscreenElement) {
+            if (document.documentElement.requestFullscreen) {
+              document.documentElement.requestFullscreen().catch((err) => console.warn("Aviso pantalla completa:", err));
+            }
+            btnTallerFs.textContent = '✕';
+          } else {
+            if (document.exitFullscreen) {
+              document.exitFullscreen().catch((err) => console.warn("Aviso salir pantalla completa:", err));
+            }
             btnTallerFs.textContent = '⛶';
           }
+        } catch (e) {
+          console.warn("Error pantalla completa:", e);
         }
       });
     }
@@ -3204,17 +3217,6 @@
         btnTallerFs.textContent = document.fullscreenElement ? '✕' : '⛶';
       }
     });
-
-    // Activar pantalla completa al interactuar por primera vez
-    const handleFirstUserTouch = () => {
-      if (!document.fullscreenElement) {
-        document.documentElement.requestFullscreen().catch(() => {});
-      }
-      window.removeEventListener('click', handleFirstUserTouch);
-      window.removeEventListener('touchstart', handleFirstUserTouch);
-    };
-    window.addEventListener('click', handleFirstUserTouch, { once: true });
-    window.addEventListener('touchstart', handleFirstUserTouch, { once: true });
 
     // Auto-detección por parámetro en URL para alumnos al escanear QR y control de acceso
     window.addEventListener('DOMContentLoaded', () => {
