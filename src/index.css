@@ -1,0 +1,161 @@
+@import "tailwindcss";
+
+@layer base {
+  html, body {
+    height: 100%;
+    height: 100dvh;
+    width: 100%;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  }
+}
+
+/* Floating circles animation for splash */
+@keyframes floatSlow1 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(30px, -40px) scale(1.1);
+  }
+}
+
+@keyframes floatSlow2 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(-35px, 30px) scale(0.92);
+  }
+}
+
+@keyframes floatSlow3 {
+  0%, 100% {
+    transform: translate(0, 0) scale(1);
+  }
+  50% {
+    transform: translate(25px, 35px) scale(1.06);
+  }
+}
+
+/* Floating particles animations */
+@keyframes particleDrift1 {
+  0% {
+    transform: translateY(0) translateX(0);
+    opacity: 0.2;
+  }
+  50% {
+    transform: translateY(-40px) translateX(20px);
+    opacity: 0.85;
+  }
+  100% {
+    transform: translateY(-80px) translateX(40px);
+    opacity: 0.1;
+  }
+}
+
+@keyframes particleDrift2 {
+  0% {
+    transform: translateY(0) translateX(0);
+    opacity: 0.3;
+  }
+  50% {
+    transform: translateY(-50px) translateX(-25px);
+    opacity: 0.9;
+  }
+  100% {
+    transform: translateY(-100px) translateX(-50px);
+    opacity: 0.15;
+  }
+}
+
+@keyframes particleDrift3 {
+  0% {
+    transform: translateY(0) translateX(0);
+    opacity: 0.25;
+  }
+  50% {
+    transform: translateY(35px) translateX(-30px);
+    opacity: 0.75;
+  }
+  100% {
+    transform: translateY(70px) translateX(-60px);
+    opacity: 0.1;
+  }
+}
+
+.animate-float-1 {
+  animation: floatSlow1 12s ease-in-out infinite;
+}
+
+.animate-float-2 {
+  animation: floatSlow2 16s ease-in-out infinite;
+}
+
+.animate-float-3 {
+  animation: floatSlow3 14s ease-in-out infinite;
+}
+
+.animate-particle-1 {
+  animation: particleDrift1 7s ease-in-out infinite alternate;
+}
+
+.animate-particle-2 {
+  animation: particleDrift2 9s ease-in-out infinite alternate;
+}
+
+.animate-particle-3 {
+  animation: particleDrift3 11s ease-in-out infinite alternate;
+}
+
+/* Author signature font and rotation */
+.font-handwriting {
+  font-family: 'Caveat', cursive, 'Brush Script MT', sans-serif;
+}
+
+.font-cinzel {
+  font-family: 'Cinzel', serif;
+}
+
+/* Diagonal strike-through for eliminated cells */
+.diagonal-strike {
+  position: relative;
+}
+
+.diagonal-strike::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 10%;
+  width: 80%;
+  height: 3px;
+  background-color: #ef4444;
+  transform: rotate(-45deg);
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.7);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+.diagonal-strike-double::before {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 10%;
+  width: 80%;
+  height: 3px;
+  background-color: #ef4444;
+  transform: rotate(45deg);
+  box-shadow: 0 0 6px rgba(239, 68, 68, 0.7);
+  border-radius: 2px;
+  pointer-events: none;
+}
+
+/* Zero screen jumping: strictly lock scale on active */
+button, [role="button"] {
+  user-select: none;
+  -webkit-user-select: none;
+}

@@ -1,0 +1,2408 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Reducción Cuadrícula</title>
+  <meta name="description" content="Entrena el descarte y cálculo del número reducido para comprobar sumas al instante." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;800;900&family=Outfit:wght@400;500;600;700&family=Caveat:wght@700&display=swap" rel="stylesheet">
+
+  <!-- =========================================================
+       LIBRERÍAS CDN: FIREBASE COMPAT V10 & LUCIDE ICONS
+       ========================================================= -->
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+  <script src="https://unpkg.com/lucide@latest"></script>
+  <style>
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+    html, body {
+      width: 100%;
+      height: 100%;
+      height: 100dvh;
+      overflow: hidden;
+      background-color: #030712;
+      color: #f5f5f4;
+      font-family: 'Outfit', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      touch-action: manipulation;
+    }
+    #app-container {
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      width: 100%;
+      height: 100dvh;
+      max-height: 100dvh;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* 1. Pantalla de Bienvenida (Intro / Splash) */
+    #splash-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      padding: 24px;
+      background: radial-gradient(ellipse at 50% 25%, #1e3a8a 0%, #0f172a 45%, #030712 90%);
+      overflow: hidden;
+    }
+
+    /* Círculos ambientales flotantes */
+    .floating-circle {
+      position: absolute;
+      border-radius: 50%;
+      pointer-events: none;
+      filter: blur(40px);
+    }
+    .circle-1 {
+      width: 320px;
+      height: 320px;
+      background: rgba(59, 130, 246, 0.16);
+      top: -80px;
+      left: -80px;
+      animation: float1 12s ease-in-out infinite;
+    }
+    .circle-2 {
+      width: 360px;
+      height: 360px;
+      background: rgba(99, 102, 241, 0.18);
+      top: 35%;
+      right: -100px;
+      animation: float2 16s ease-in-out infinite;
+    }
+    .circle-3 {
+      width: 280px;
+      height: 280px;
+      background: rgba(245, 158, 11, 0.14);
+      bottom: -60px;
+      left: 20%;
+      animation: float3 14s ease-in-out infinite;
+    }
+    @keyframes float1 {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      50% { transform: translate(30px, -40px) scale(1.1); }
+    }
+    @keyframes float2 {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      50% { transform: translate(-35px, 30px) scale(0.92); }
+    }
+    @keyframes float3 {
+      0%, 100% { transform: translate(0, 0) scale(1); }
+      50% { transform: translate(25px, 35px) scale(1.06); }
+    }
+
+    /* Partículas activas flotantes */
+    .particle {
+      position: absolute;
+      border-radius: 50%;
+      pointer-events: none;
+    }
+    .p-1 { width: 6px; height: 6px; background: rgba(251, 191, 36, 0.6); top: 18%; left: 15%; animation: particleDrift1 7s ease-in-out infinite alternate; }
+    .p-2 { width: 8px; height: 8px; background: rgba(96, 165, 250, 0.7); top: 32%; right: 20%; animation: particleDrift2 9s ease-in-out infinite alternate; }
+    .p-3 { width: 5px; height: 5px; background: rgba(165, 180, 252, 0.6); top: 55%; left: 12%; animation: particleDrift3 11s ease-in-out infinite alternate; }
+    .p-4 { width: 7px; height: 7px; background: rgba(252, 211, 77, 0.6); top: 72%; right: 16%; animation: particleDrift1 8s ease-in-out infinite alternate 1.5s; }
+    .p-5 { width: 5px; height: 5px; background: rgba(147, 197, 253, 0.6); top: 22%; right: 38%; animation: particleDrift2 10s ease-in-out infinite alternate 2.5s; }
+    .p-6 { width: 6px; height: 6px; background: rgba(251, 191, 36, 0.5); top: 46%; left: 28%; animation: particleDrift3 12s ease-in-out infinite alternate 3s; }
+    .p-7 { width: 7px; height: 7px; background: rgba(129, 140, 248, 0.6); top: 82%; left: 32%; animation: particleDrift1 9s ease-in-out infinite alternate 0.8s; }
+    .p-8 { width: 4px; height: 4px; background: rgba(255, 255, 255, 0.7); top: 38%; left: 8%; animation: particleDrift2 11s ease-in-out infinite alternate 4s; }
+
+    @keyframes particleDrift1 {
+      0% { transform: translateY(0) translateX(0); opacity: 0.2; }
+      50% { transform: translateY(-40px) translateX(20px); opacity: 0.85; }
+      100% { transform: translateY(-80px) translateX(40px); opacity: 0.1; }
+    }
+    @keyframes particleDrift2 {
+      0% { transform: translateY(0) translateX(0); opacity: 0.3; }
+      50% { transform: translateY(-50px) translateX(-25px); opacity: 0.9; }
+      100% { transform: translateY(-100px) translateX(-50px); opacity: 0.15; }
+    }
+    @keyframes particleDrift3 {
+      0% { transform: translateY(0) translateX(0); opacity: 0.25; }
+      50% { transform: translateY(35px) translateX(-30px); opacity: 0.75; }
+      100% { transform: translateY(70px) translateX(-60px); opacity: 0.1; }
+    }
+
+    .badge-intro {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 14px;
+      border-radius: 9999px;
+      border: 1px solid rgba(251, 191, 36, 0.4);
+      background: rgba(245, 158, 11, 0.1);
+      color: #fcd34d;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      margin: 0 auto;
+    }
+    .title-line-1 {
+      font-family: 'Cinzel', serif;
+      font-size: clamp(2.4rem, 9vw, 4.2rem);
+      font-weight: 900;
+      color: #ffffff;
+      line-height: 1;
+      letter-spacing: 0.02em;
+    }
+    .title-line-2 {
+      font-family: 'Cinzel', serif;
+      font-size: clamp(2.4rem, 9vw, 4.2rem);
+      font-weight: 900;
+      color: #fbbf24;
+      line-height: 1;
+      letter-spacing: 0.02em;
+    }
+    .author-signature {
+      font-family: 'Caveat', cursive;
+      font-size: 26px;
+      color: #fcd34d;
+      transform: rotate(-6deg);
+      text-shadow: 0 2px 8px rgba(251, 191, 36, 0.4);
+    }
+    .btn-comenzar {
+      background: #f59e0b;
+      color: #0c0a09;
+      font-weight: 800;
+      font-size: 18px;
+      padding: 14px 32px;
+      border-radius: 12px;
+      border: 1px solid rgba(253, 230, 138, 0.5);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      box-shadow: 0 8px 24px rgba(245, 158, 11, 0.3);
+      transition: background 0.15s ease, opacity 0.15s ease;
+    }
+    .btn-comenzar:hover {
+      background: #fbbf24;
+    }
+
+    /* 2. Barra Superior Optimizada para Pantallas Estrechas (360px) */
+    header {
+      background: #1c1917;
+      border-bottom: 1px solid #292524;
+      padding: 6px 8px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 4px;
+      flex-shrink: 0;
+      z-index: 10;
+      min-height: 46px;
+    }
+    .mode-nav {
+      display: flex;
+      background: #0c0a09;
+      padding: 2px;
+      border-radius: 8px;
+      border: 1px solid #292524;
+      gap: 1px;
+    }
+    .mode-btn {
+      padding: 5px 9px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #a8a29e;
+      background: transparent;
+      border: none;
+      border-radius: 6px;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: all 0.15s ease;
+    }
+    @media (min-width: 380px) {
+      .mode-btn {
+        padding: 5px 12px;
+        font-size: 12px;
+      }
+    }
+    .mode-btn.active {
+      background: #f59e0b;
+      color: #0c0a09;
+    }
+    .tool-btn {
+      background: #292524;
+      color: #e7e5e4;
+      border: 1px solid #44403c;
+      padding: 5px 8px;
+      border-radius: 7px;
+      font-size: 11px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 3px;
+      white-space: nowrap;
+    }
+    .tool-btn:hover {
+      background: #44403c;
+    }
+
+    /* 3. Sub-barra Compacta */
+    .sub-bar {
+      background: rgba(28, 25, 23, 0.9);
+      border-bottom: 1px solid rgba(41, 37, 36, 0.9);
+      padding: 5px 10px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11.5px;
+      flex-shrink: 0;
+      z-index: 10;
+      min-height: 38px;
+    }
+    .timer-text {
+      font-family: monospace;
+      font-weight: 700;
+      color: #fcd34d;
+      font-size: 13px;
+    }
+
+    /* 4. Área del Tablero - Centrado Equilibrado y Sin Huecos Excesivos */
+    .board-container {
+      flex: 1;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 6px 10px;
+      overflow: hidden;
+      position: relative;
+      min-height: 0;
+    }
+    .grid-board-wrapper {
+      width: 100%;
+      max-width: min(94vw, calc(100dvh - 200px));
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+    }
+    .grid-board {
+      width: 100%;
+      aspect-ratio: 1 / 1;
+      background: #1c1917;
+      border: 1px solid #292524;
+      border-radius: 16px;
+      padding: 8px;
+      display: grid;
+      gap: 6px;
+      box-shadow: 0 15px 35px rgba(0,0,0,0.7);
+    }
+    .cell {
+      background: #292524;
+      color: #ffffff;
+      border: 1px solid #44403c;
+      border-radius: 10px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-family: monospace;
+      font-size: clamp(20px, 5.5vw, 34px);
+      cursor: pointer;
+      position: relative;
+      transition: background 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease;
+    }
+
+    /* Sombreado Modo Tradicional */
+    .cell.trad-marked {
+      background: #eab308 !important;
+      color: #0c0a09 !important;
+      border-color: #fde047 !important;
+      box-shadow: inset 0 0 0 1.5px rgba(254, 240, 138, 0.8);
+    }
+    .cell.trad-marked::before {
+      content: '✓';
+      position: absolute;
+      top: 3px;
+      right: 4px;
+      font-size: 10px;
+      background: #0c0a09;
+      color: #eab308;
+      border-radius: 9999px;
+      width: 14px;
+      height: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 900;
+    }
+
+    /* Tachado Modo Reducción */
+    .cell.eliminated {
+      background: #141210 !important;
+      color: #57534e !important;
+      border-color: #262220 !important;
+      cursor: not-allowed;
+      opacity: 0.38;
+      position: relative;
+    }
+    .cell.eliminated::after {
+      content: '';
+      position: absolute;
+      top: 50%;
+      left: 10%;
+      width: 80%;
+      height: 3px;
+      background: #ef4444;
+      transform: rotate(-45deg);
+      box-shadow: 0 0 6px rgba(239, 68, 68, 0.8);
+      border-radius: 2px;
+    }
+    .cell.selected {
+      background: #082f49 !important;
+      color: #bae6fd !important;
+      border-color: #38bdf8 !important;
+      box-shadow: inset 0 0 0 1.5px #38bdf8;
+    }
+    .cell.selected::before {
+      content: '●';
+      position: absolute;
+      top: 3px;
+      left: 4px;
+      font-size: 10px;
+      color: #38bdf8;
+    }
+
+    /* Controles de selección y feedback en modo Reducción */
+    .reduction-controls-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      width: 100%;
+      padding: 0 4px;
+      min-height: 24px;
+      font-size: 11px;
+    }
+    .btn-clear-selection {
+      background: #292524;
+      color: #d6d3d1;
+      border: 1px solid #44403c;
+      padding: 2px 8px;
+      border-radius: 6px;
+      font-size: 10px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+    .btn-clear-selection:hover {
+      background: #3f3f46;
+      color: #fff;
+    }
+
+    /* Feedback flotante temporal */
+    #selection-feedback {
+      position: absolute;
+      bottom: 6px;
+      background: rgba(12, 10, 9, 0.92);
+      border: 1px solid #44403c;
+      padding: 3px 12px;
+      border-radius: 9999px;
+      font-size: 11px;
+      color: #fbbf24;
+      pointer-events: none;
+      display: none;
+      z-index: 20;
+      font-weight: 600;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+    }
+
+    /* 5. Teclado Táctil Integrado con Margen de Seguridad Inferior */
+    .keypad-bar {
+      background: rgba(24, 21, 19, 0.97);
+      border-top: 1px solid #292524;
+      padding: 8px 8px max(0.85rem, env(safe-area-inset-bottom)) 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex-shrink: 0;
+      z-index: 10;
+    }
+    .keypad-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      max-width: 500px;
+      margin: 0 auto;
+      width: 100%;
+      font-size: 12px;
+    }
+    .digit-preview {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 16px;
+      background: #292524;
+      border: 1px solid #44403c;
+      color: #a8a29e;
+      margin-left: 6px;
+    }
+    .digit-preview.active {
+      background: #f59e0b;
+      color: #0c0a09;
+      border-color: #fde047;
+    }
+    .btn-comprobar {
+      background: #059669;
+      color: #ffffff;
+      border: 1px solid #10b981;
+      padding: 6px 16px;
+      border-radius: 8px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: background 0.12s ease;
+    }
+    .btn-comprobar:disabled {
+      background: #292524;
+      color: #78716c;
+      border-color: #44403c;
+      cursor: not-allowed;
+    }
+    .keypad-grid {
+      display: grid;
+      grid-template-columns: repeat(10, 1fr);
+      gap: 4px;
+      max-width: 500px;
+      margin: 0 auto;
+      width: 100%;
+    }
+    .keypad-digit-btn {
+      height: 44px;
+      border-radius: 8px;
+      background: #292524;
+      color: #f5f5f4;
+      border: 1px solid #44403c;
+      font-size: 16px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: background 0.1s ease;
+    }
+    .keypad-digit-btn.active {
+      background: #f59e0b;
+      color: #0c0a09;
+      border-color: #fde047;
+      font-weight: 900;
+    }
+
+    /* 6. Modales */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.85);
+      z-index: 200;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+    }
+    .modal-backdrop.show {
+      display: flex;
+    }
+    .modal-card {
+      background: #1c1917;
+      border: 1px solid #292524;
+      border-radius: 16px;
+      padding: 18px;
+      width: 100%;
+      max-width: 460px;
+      box-shadow: 0 25px 50px rgba(0, 0, 0, 0.85);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      max-height: 90dvh;
+      overflow-y: auto;
+    }
+
+    /* Vista Comparativa */
+    #comparativa-view {
+      flex: 1;
+      width: 100%;
+      max-width: 500px;
+      margin: 0 auto;
+      padding: 16px 12px;
+      display: none;
+      flex-direction: column;
+      justify-content: space-between;
+      overflow-y: auto;
+    }
+    .stat-card {
+      background: #1c1917;
+      border: 1px solid #292524;
+      border-radius: 12px;
+      padding: 14px;
+      flex: 1;
+    }
+
+    /* Mini-tablero de demostración para tutoriales */
+    .demo-grid-2x2 {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 8px;
+      width: 150px;
+      margin: 8px auto;
+      padding: 8px;
+      background: #0c0a09;
+      border-radius: 12px;
+      border: 1px solid #292524;
+    }
+    .demo-cell {
+      height: 48px;
+      background: #292524;
+      color: #fff;
+      border: 1px solid #44403c;
+      border-radius: 8px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 19px;
+      font-weight: 800;
+      font-family: monospace;
+      cursor: pointer;
+      position: relative;
+    }
+
+    /* Indicador de pasos del Tutorial */
+    .step-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 700;
+      color: #fbbf24;
+      background: rgba(245, 158, 11, 0.1);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      padding: 3px 10px;
+      border-radius: 9999px;
+    }
+
+    /* Canvas de Confeti de Victoria */
+    #confetti-canvas {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      z-index: 300;
+      display: none;
+    }
+
+    /* Modal de Validación y Acceso (Estructura Acomodo Matemático) */
+    #auth-modal-screen {
+      position: fixed;
+      inset: 0;
+      z-index: 999999;
+      background-color: #0f172a;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+      backdrop-filter: blur(8px);
+    }
+    /* =========================================================
+       ESTILOS DEL MODAL BLOQUEANTE DE ACCESO (#modal-validacion-acceso)
+       ========================================================= */
+    .auth-modal-overlay {
+      position: fixed;
+      inset: 0;
+      z-index: 99999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: radial-gradient(circle at center, rgba(15, 23, 42, 0.96) 0%, rgba(3, 7, 18, 0.99) 100%);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      padding: 1rem;
+      transition: opacity 0.3s ease, visibility 0.3s ease;
+    }
+    .auth-modal-overlay.hidden {
+      display: none !important;
+      opacity: 0;
+      visibility: hidden;
+      pointer-events: none;
+    }
+    .auth-card-container {
+      position: relative;
+      width: 100%;
+      max-width: 440px;
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 1.25rem;
+      padding: 1.75rem 1.5rem;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.75), 0 0 0 1px rgba(255, 255, 255, 0.05);
+      color: #f8fafc;
+      overflow: hidden;
+    }
+    .auth-card-glow {
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(90deg, transparent, #38bdf8, transparent);
+    }
+    .auth-icon-badge {
+      width: 52px;
+      height: 52px;
+      border-radius: 1rem;
+      background: rgba(56, 189, 248, 0.12);
+      border: 1px solid rgba(56, 189, 248, 0.28);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin: 0 auto 0.75rem;
+    }
+    .auth-badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.2rem 0.65rem;
+      border-radius: 9999px;
+      font-size: 0.7rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      background: rgba(56, 189, 248, 0.1);
+      color: #38bdf8;
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      margin-bottom: 0.5rem;
+    }
+    .auth-title {
+      font-family: var(--font-display, 'Outfit', sans-serif);
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: #ffffff;
+      text-align: center;
+      margin: 0 0 0.35rem;
+    }
+    .auth-subtitle {
+      font-size: 0.8rem;
+      color: #94a3b8;
+      text-align: center;
+      line-height: 1.45;
+      margin: 0 0 1.25rem;
+    }
+    .auth-tab-bar {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 0.35rem;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 0.75rem;
+      padding: 0.25rem;
+      margin-bottom: 1.25rem;
+    }
+    .auth-tab-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      padding: 0.55rem 0.75rem;
+      font-size: 0.8rem;
+      font-weight: 700;
+      color: #94a3b8;
+      border: none;
+      border-radius: 0.5rem;
+      background: transparent;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .auth-tab-btn.active {
+      background: #1e293b;
+      color: #ffffff;
+      border: 1px solid #334155;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+    }
+    .auth-error-alert {
+      background: rgba(127, 29, 29, 0.35);
+      border: 1px solid rgba(239, 68, 68, 0.55);
+      color: #fca5a5;
+      padding: 0.6rem 0.85rem;
+      border-radius: 0.6rem;
+      font-size: 0.75rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      text-align: left;
+    }
+    .auth-form-block {
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+    }
+    .auth-field-group {
+      text-align: left;
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+    }
+    .auth-field-label {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: #cbd5e1;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .auth-input-control {
+      width: 100%;
+      background: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 0.7rem;
+      padding: 0.65rem 0.85rem;
+      color: #ffffff;
+      font-size: 0.85rem;
+      outline: none;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .auth-input-control:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.22);
+    }
+    .auth-code-input {
+      text-transform: uppercase;
+      font-family: monospace;
+      text-align: center;
+      font-size: 1.05rem;
+      letter-spacing: 0.12em;
+      font-weight: 800;
+      color: #7dd3fc;
+    }
+    .auth-field-hint {
+      font-size: 0.7rem;
+      color: #64748b;
+      margin-top: 0.1rem;
+    }
+    .auth-btn-primary {
+      width: 100%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      background: #38bdf8;
+      color: #0f172a;
+      border: none;
+      border-radius: 0.7rem;
+      padding: 0.75rem 1rem;
+      font-size: 0.85rem;
+      font-weight: 800;
+      cursor: pointer;
+      box-shadow: 0 4px 14px rgba(56, 189, 248, 0.28);
+      transition: all 0.2s ease;
+      margin-top: 0.25rem;
+    }
+    .auth-btn-primary:hover {
+      background: #7dd3fc;
+      transform: translateY(-1px);
+    }
+    .auth-btn-primary:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .auth-btn-emerald {
+      background: #10b981;
+      color: #ffffff;
+      box-shadow: 0 4px 14px rgba(16, 185, 129, 0.28);
+    }
+    .auth-btn-emerald:hover {
+      background: #34d399;
+    }
+    .auth-license-confirmed-box {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      padding: 0.65rem 0.85rem;
+      border-radius: 0.7rem;
+      background: rgba(16, 185, 129, 0.12);
+      border: 1px solid rgba(16, 185, 129, 0.35);
+      margin-bottom: 0.35rem;
+    }
+    .auth-modal-footer {
+      margin-top: 1.25rem;
+      padding-top: 0.85rem;
+      border-top: 1px solid #334155;
+      font-size: 0.7rem;
+      color: #64748b;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-wrap: wrap;
+      gap: 0.25rem;
+    }
+    .auth-footer-highlight {
+      color: #38bdf8;
+      font-weight: 700;
+    }
+    /* Barra superior discreta autorizada */
+    #auth-session-bar {
+      width: 100%;
+      background-color: #0f172a;
+      border-bottom: 1px solid #1e293b;
+      padding: 6px 16px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12px;
+      color: #cbd5e1;
+      z-index: 50;
+      flex-shrink: 0;
+    }
+    #auth-session-bar.hidden {
+      display: none !important;
+    }
+    .btn-auth-logout {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      background: rgba(239, 68, 68, 0.15);
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      color: #fca5a5;
+      padding: 0.35rem 0.7rem;
+      border-radius: 0.5rem;
+      font-size: 0.75rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .btn-auth-logout:hover {
+      background: rgba(239, 68, 68, 0.28);
+      border-color: #ef4444;
+      color: #ffffff;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="confetti-canvas"></canvas>
+
+  <!-- Barra superior discreta en la vista autorizada -->
+  <div id="auth-session-bar" class="hidden">
+    <div style="display: flex; align-items: center; gap: 8px;">
+      <span style="color: #38bdf8; font-weight: 700; display: inline-flex; align-items: center; gap: 4px;">
+        <i data-lucide="shield-check" style="width: 14px; height: 14px;"></i>
+        <span>Suscripción Activa</span>
+      </span>
+      <span style="color: #64748b;">•</span>
+      <span id="auth-user-display" style="font-family: monospace; color: #e2e8f0; font-size: 11px;">Docente Autorizado</span>
+    </div>
+    <button id="btn-auth-logout" class="btn-auth-logout" title="Cerrar sesión">
+      <i data-lucide="log-out" style="width: 13px; height: 13px;"></i>
+      <span>Cerrar Sesión</span>
+    </button>
+  </div>
+
+  <!-- =========================================================
+       MODAL BLOQUEANTE DE AUTENTICACIÓN (#modal-validacion-acceso)
+       ========================================================= -->
+  <div id="modal-validacion-acceso" class="auth-modal-overlay">
+    <div class="auth-card-container">
+      <div class="auth-card-glow"></div>
+
+      <!-- Ícono distintivo -->
+      <div class="auth-icon-badge">
+        <i data-lucide="shield-check" style="width: 26px; height: 26px; color: #38bdf8;"></i>
+      </div>
+
+      <div style="text-align: center;">
+        <div class="auth-badge-pill">
+          <i data-lucide="sparkles" style="width: 12px; height: 12px;"></i>
+          <span>Validación y Acceso Docente</span>
+        </div>
+      </div>
+
+      <h2 class="auth-title">Control de Acceso</h2>
+      <p class="auth-subtitle">
+        Inicia sesión con tu cuenta de docente o canjea una licencia institucional activa.
+      </p>
+
+      <!-- Selector de pestañas -->
+      <div class="auth-tab-bar">
+        <button type="button" id="tab-auth-login" class="auth-tab-btn active">
+          <i data-lucide="log-in" style="width: 14px; height: 14px;"></i>
+          <span>Iniciar Sesión</span>
+        </button>
+        <button type="button" id="tab-auth-redeem" class="auth-tab-btn">
+          <i data-lucide="key-round" style="width: 14px; height: 14px;"></i>
+          <span>Canjear Licencia</span>
+        </button>
+      </div>
+
+      <!-- Alerta de Error / Notificación -->
+      <div id="auth-error-alert" class="auth-error-alert" style="display: none;">
+        <i data-lucide="alert-circle" style="width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px;"></i>
+        <span id="auth-error-text"></span>
+      </div>
+
+      <!-- PESTAÑA 1: INICIAR SESIÓN -->
+      <form id="form-auth-login" class="auth-form-block">
+        <div class="auth-field-group">
+          <label class="auth-field-label" for="login-email">Correo Electrónico</label>
+          <input
+            type="email"
+            id="login-email"
+            class="auth-input-control"
+            placeholder="docente@ejemplo.com"
+            autocomplete="username"
+            required
+          />
+        </div>
+
+        <div class="auth-field-group">
+          <label class="auth-field-label" for="login-password">Contraseña</label>
+          <input
+            type="password"
+            id="login-password"
+            class="auth-input-control"
+            placeholder="••••••••"
+            autocomplete="current-password"
+            required
+          />
+        </div>
+
+        <button type="submit" id="btn-submit-login" class="auth-btn-primary">
+          <i data-lucide="log-in" style="width: 16px; height: 16px;"></i>
+          <span>Iniciar Sesión</span>
+        </button>
+      </form>
+
+      <!-- PESTAÑA 2: CANJEAR LICENCIA -->
+      <div id="section-auth-redeem" class="auth-form-block" style="display: none;">
+        <!-- PASO A: VALIDAR CÓDIGO -->
+        <form id="form-redeem-step-a">
+          <div class="auth-field-group">
+            <label class="auth-field-label" for="redeem-code">Código de Activación</label>
+            <input
+              type="text"
+              id="redeem-code"
+              class="auth-input-control auth-code-input"
+              placeholder="SUB-XXXXXX"
+              autocomplete="off"
+            />
+            <p class="auth-field-hint">Ingresa el código único para verificar su vigencia en Firestore.</p>
+          </div>
+
+          <button type="submit" id="btn-verify-code" class="auth-btn-primary">
+            <span>Continuar al Registro</span>
+            <i data-lucide="arrow-right" style="width: 16px; height: 16px;"></i>
+          </button>
+        </form>
+
+        <!-- PASO B: CREAR USUARIO Y REGISTRAR EN FIRESTORE -->
+        <form id="form-redeem-step-b" style="display: none;">
+          <!-- Banner verde de confirmación -->
+          <div class="auth-license-confirmed-box">
+            <i data-lucide="calendar-check" style="width: 20px; height: 20px; color: #34d399; flex-shrink: 0;"></i>
+            <div style="text-align: left;">
+              <p style="font-weight: 700; color: #6ee7b7; font-size: 0.75rem;">Licencia confirmada</p>
+              <p style="color: #cbd5e1; font-size: 0.75rem;">
+                Vigente hasta: <strong id="license-expiration-text" style="color: #ffffff;">-</strong>
+              </p>
+            </div>
+          </div>
+
+          <div class="auth-field-group">
+            <label class="auth-field-label" for="reg-email">Correo para tu cuenta</label>
+            <input
+              type="email"
+              id="reg-email"
+              class="auth-input-control"
+              placeholder="tucorreo@ejemplo.com"
+              autocomplete="email"
+              required
+            />
+          </div>
+
+          <div class="auth-field-group">
+            <label class="auth-field-label" for="reg-password">Crea tu Contraseña</label>
+            <input
+              type="password"
+              id="reg-password"
+              class="auth-input-control"
+              placeholder="Mínimo 6 caracteres"
+              minlength="6"
+              autocomplete="new-password"
+              required
+            />
+          </div>
+
+          <button type="submit" id="btn-activate-account" class="auth-btn-primary auth-btn-emerald">
+            <i data-lucide="check-circle-2" style="width: 16px; height: 16px;"></i>
+            <span>Activar Cuenta y Entrar</span>
+          </button>
+        </form>
+      </div>
+
+      <!-- Pie del modal -->
+      <div class="auth-modal-footer">
+        <span>¿Eres alumno con enlace de sala?</span>
+        <span class="auth-footer-highlight">Acceso directo sin contraseña</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="app-container" class="hidden" style="display: none;">
+    <!-- 1. Pantalla de Bienvenida (Intro / Splash) -->
+    <div id="splash-screen">
+      <div class="floating-circle circle-1"></div>
+      <div class="floating-circle circle-2"></div>
+      <div class="floating-circle circle-3"></div>
+
+      <div class="particle p-1"></div>
+      <div class="particle p-2"></div>
+      <div class="particle p-3"></div>
+      <div class="particle p-4"></div>
+      <div class="particle p-5"></div>
+      <div class="particle p-6"></div>
+      <div class="particle p-7"></div>
+      <div class="particle p-8"></div>
+
+      <div style="text-align: center; position: relative; z-index: 10; padding-top: 4px;">
+        <div class="badge-intro">✦ AGILIDAD MENTAL &amp; NÚMERO REDUCIDO</div>
+      </div>
+
+      <div style="text-align: center; position: relative; z-index: 10; max-width: 480px; margin: auto; padding: 0 12px;">
+        <div style="margin-bottom: 14px;">
+          <div class="title-line-1">REDUCCIÓN</div>
+          <div class="title-line-2">CUADRÍCULA</div>
+        </div>
+        <p style="color: #d6d3d1; font-size: 15px; line-height: 1.5; margin-bottom: 24px;">
+          &ldquo;Entrena el descarte y cálculo del número reducido para comprobar sumas al instante.&rdquo;
+        </p>
+        <button id="btn-comenzar" class="btn-comenzar" onclick="hideSplash()">
+          <span>Comenzar</span>
+          <span>→</span>
+        </button>
+      </div>
+
+      <div style="text-align: right; position: relative; z-index: 10; padding-right: 14px;">
+        <div class="author-signature">por Robert Pacheco</div>
+      </div>
+    </div>
+
+    <!-- 2. Barra Superior Limpia y Responsiva -->
+    <header>
+      <button class="tool-btn" onclick="showSplash()" title="Portada">✦ Inicio</button>
+      <div class="mode-nav">
+        <button id="nav-tradicional" class="mode-btn active" onclick="switchMode('tradicional')">Tradicional</button>
+        <button id="nav-reduccion" class="mode-btn" onclick="switchMode('reduccion')">Reducción</button>
+        <button id="nav-comparativa" class="mode-btn" onclick="switchMode('comparativa')">Comparativa</button>
+      </div>
+      <div style="display: flex; gap: 4px;">
+        <button id="btn-dims" class="tool-btn" onclick="openDimensionsModal()">4×4</button>
+        <button class="tool-btn" onclick="openTutorialModal()" title="Tutorial interactivo">?</button>
+      </div>
+    </header>
+
+    <!-- 3. Sub-barra Compacta -->
+    <div id="sub-bar" class="sub-bar">
+      <div style="display: flex; align-items: center; gap: 4px;">
+        <span>⏱</span>
+        <span id="stopwatch-display" class="timer-text">0.0s</span>
+      </div>
+      <div id="counter-display" style="color: #d6d3d1; font-weight: 500;">
+        Sumadas: <strong id="active-count-label" style="color: #fbbf24;">0</strong> / <span id="total-count-label">16</span>
+      </div>
+      <div style="display: flex; gap: 4px;">
+        <button class="tool-btn" onclick="resetCurrentAttempt()">Reiniciar</button>
+        <button class="tool-btn" style="color: #fbbf24;" onclick="generateNewGrid()" title="Generar nueva matriz">↻ Nueva</button>
+      </div>
+    </div>
+
+    <!-- 4. Área del Tablero (Centrado y Equilibrado) -->
+    <div id="board-container" class="board-container">
+      <div class="grid-board-wrapper">
+        <div id="reduction-controls-bar" class="reduction-controls-bar" style="display: none;">
+          <span id="reduction-status-hint" style="color: #38bdf8; font-weight: 500;">Toca 0, 9 o agrupa casillas</span>
+          <button class="btn-clear-selection" onclick="clearManualSelection()">Limpiar selección</button>
+        </div>
+        <div id="grid-board" class="grid-board"></div>
+      </div>
+      <div id="selection-feedback"></div>
+    </div>
+
+    <!-- 5. Vista de Comparativa -->
+    <div id="comparativa-view">
+      <div style="text-align: center; margin-bottom: 12px;">
+        <h2 style="font-family: 'Cinzel', serif; font-size: 20px; color: #fff;">Tradicional vs. Reducción</h2>
+        <p style="font-size: 12px; color: #a8a29e; margin-top: 4px;">Comparación directa de tiempos en la misma cuadrícula</p>
+      </div>
+
+      <div style="display: flex; gap: 10px; margin-bottom: 14px;">
+        <div class="stat-card">
+          <div style="font-size: 11px; color: #a8a29e;">Suma Tradicional</div>
+          <div id="stat-trad-time" style="font-size: 24px; font-weight: 800; font-family: monospace; color: #fff; margin: 6px 0;">—</div>
+          <div id="stat-trad-status" style="font-size: 11px; color: #78716c;">Pendiente</div>
+        </div>
+        <div class="stat-card" style="border-color: rgba(245, 158, 11, 0.4);">
+          <div style="font-size: 11px; color: #fbbf24; font-weight: 600;">Modo Reducción</div>
+          <div id="stat-red-time" style="font-size: 24px; font-weight: 800; font-family: monospace; color: #fcd34d; margin: 6px 0;">—</div>
+          <div id="stat-red-status" style="font-size: 11px; color: #78716c;">Pendiente</div>
+        </div>
+      </div>
+
+      <div id="comparison-result-box" style="background: rgba(6, 78, 59, 0.3); border: 1px solid rgba(16, 185, 129, 0.3); border-radius: 12px; padding: 14px; margin-bottom: 14px; display: none;">
+        <div style="font-size: 14px; font-weight: 700; color: #a7f3d0;" id="comp-headline">¡60% más rápido con Reducción!</div>
+        <p style="font-size: 12px; color: #6ee7b7; margin-top: 4px; line-height: 1.4;">
+          Al descartar de inmediato ceros, nueves y grupos cuya suma o reducción da 9, calculas el número reducido sin arrastres lentos.
+        </p>
+      </div>
+
+      <button class="btn-comenzar" style="width: 100%; justify-content: center; font-size: 15px;" onclick="generateNewGrid(); switchMode('tradicional');">
+        ✦ Nuevo Desafío de Velocidad
+      </button>
+    </div>
+
+    <!-- 6. Teclado Táctil Integrado con Margen Seguro Inferior -->
+    <div id="keypad-bar" class="keypad-bar">
+      <div class="keypad-header">
+        <div style="display: flex; align-items: center;">
+          <span style="color: #a8a29e;">Número reducido:</span>
+          <span id="digit-preview" class="digit-preview">—</span>
+        </div>
+        <button id="btn-comprobar" class="btn-comprobar" disabled onclick="checkAnswer()">
+          ✓ Comprobar
+        </button>
+      </div>
+      <div class="keypad-grid" id="keypad-grid"></div>
+    </div>
+  </div>
+
+  <!-- Modal Tutorial Interactivo (Explicación Previa + Práctica Guiada) -->
+  <div id="tutorial-modal" class="modal-backdrop">
+    <div class="modal-card">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h3 id="tutorial-title" style="font-family: 'Cinzel', serif; font-size: 16px; color: #fff;">Tutorial</h3>
+        <button class="tool-btn" onclick="closeTutorial()">✕</button>
+      </div>
+
+      <!-- Contenedor dinámico del Tutorial (Fase 1: Explicación previa / Fase 2: Práctica guiada) -->
+      <div id="tutorial-content-body"></div>
+
+      <label style="font-size: 11.5px; color: #d6d3d1; display: flex; align-items: center; gap: 8px; cursor: pointer; padding: 6px 10px; background: rgba(0,0,0,0.3); border-radius: 8px; border: 1px solid #292524; margin-top: 4px;">
+        <input type="checkbox" id="check-dont-show" style="width: 16px; height: 16px; accent-color: #f59e0b; cursor: pointer;"> No volver a mostrar este tutorial antes de realizar la actividad
+      </label>
+    </div>
+  </div>
+
+  <!-- Modal Dimensiones -->
+  <div id="dims-modal" class="modal-backdrop">
+    <div class="modal-card" style="max-width: 300px;">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <h3 style="font-family: 'Cinzel', serif; font-size: 15px; color: #fff;">Dimensiones</h3>
+        <button class="tool-btn" onclick="closeDimensionsModal()">✕</button>
+      </div>
+      <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 8px;">
+        <button class="tool-btn" style="padding: 12px; justify-content: center; font-size: 14px;" onclick="setDimensions(3, 3)">3 × 3</button>
+        <button class="tool-btn" style="padding: 12px; justify-content: center; font-size: 14px; color: #fbbf24;" onclick="setDimensions(4, 4)">4 × 4</button>
+        <button class="tool-btn" style="padding: 12px; justify-content: center; font-size: 14px;" onclick="setDimensions(5, 5)">5 × 5</button>
+        <button class="tool-btn" style="padding: 12px; justify-content: center; font-size: 14px;" onclick="setDimensions(6, 6)">6 × 6</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Modal Resultado -->
+  <div id="result-modal" class="modal-backdrop">
+    <div class="modal-card">
+      <h3 id="result-title" style="font-family: 'Cinzel', serif; font-size: 19px; color: #fff;">¡Resultado!</h3>
+      <div id="result-body" style="font-size: 13px; color: #d6d3d1; line-height: 1.5; display: flex; flex-direction: column; gap: 8px;"></div>
+      <div style="display: flex; flex-direction: column; gap: 8px; margin-top: 6px;">
+        <button class="tool-btn" style="padding: 10px; justify-content: center; font-size: 13px;" onclick="closeResultModal()">
+          Aceptar
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    // ================= WEB AUDIO API NATIVA =================
+    let audioCtx = null;
+    function initAudio() {
+      if (!audioCtx) {
+        const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+        if (AudioContextClass) {
+          audioCtx = new AudioContextClass();
+        }
+      }
+      if (audioCtx && audioCtx.state === 'suspended') {
+        audioCtx.resume();
+      }
+    }
+
+    // 1. Sonido Pop/Blip suave al tocar casillas
+    function playPopSound() {
+      try {
+        initAudio();
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(440, audioCtx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(880, audioCtx.currentTime + 0.06);
+        gain.gain.setValueAtTime(0.12, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.07);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.08);
+      } catch (e) {}
+    }
+
+    // 2. Tono armónico ascendente al tachar y descartar grupos de 9
+    function playHarmonicDiscardSound() {
+      try {
+        initAudio();
+        if (!audioCtx) return;
+        const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+        notes.forEach((freq, idx) => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(freq, audioCtx.currentTime + idx * 0.05);
+          gain.gain.setValueAtTime(0.14, audioCtx.currentTime + idx * 0.05);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + idx * 0.05 + 0.22);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(audioCtx.currentTime + idx * 0.05);
+          osc.stop(audioCtx.currentTime + idx * 0.05 + 0.23);
+        });
+      } catch (e) {}
+    }
+
+    // 3. Fanfarria de victoria al comprobar número reducido correcto
+    function playVictoryFanfare() {
+      try {
+        initAudio();
+        if (!audioCtx) return;
+        const melody = [
+          { f: 523.25, t: 0, d: 0.12 },
+          { f: 659.25, t: 0.12, d: 0.12 },
+          { f: 783.99, t: 0.24, d: 0.14 },
+          { f: 1046.50, t: 0.40, d: 0.35 }
+        ];
+        melody.forEach(n => {
+          const osc = audioCtx.createOscillator();
+          const gain = audioCtx.createGain();
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(n.f, audioCtx.currentTime + n.t);
+          gain.gain.setValueAtTime(0.18, audioCtx.currentTime + n.t);
+          gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + n.t + n.d);
+          osc.connect(gain);
+          gain.connect(audioCtx.destination);
+          osc.start(audioCtx.currentTime + n.t);
+          osc.stop(audioCtx.currentTime + n.t + n.d + 0.02);
+        });
+      } catch (e) {}
+    }
+
+    // 4. Sonido suave para respuesta errónea
+    function playErrorSound() {
+      try {
+        initAudio();
+        if (!audioCtx) return;
+        const osc = audioCtx.createOscillator();
+        const gain = audioCtx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(220, audioCtx.currentTime);
+        osc.frequency.linearRampToValueAtTime(140, audioCtx.currentTime + 0.15);
+        gain.gain.setValueAtTime(0.1, audioCtx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + 0.16);
+        osc.connect(gain);
+        gain.connect(audioCtx.destination);
+        osc.start();
+        osc.stop(audioCtx.currentTime + 0.17);
+      } catch (e) {}
+    }
+
+    // ================= CONFETI DE VICTORIA EN CANVAS =================
+    let confettiParticles = [];
+    let confettiAnimationId = null;
+
+    function launchConfetti() {
+      const canvas = document.getElementById('confetti-canvas');
+      const ctx = canvas.getContext('2d');
+      canvas.width = window.innerWidth;
+      canvas.height = window.innerHeight;
+      canvas.style.display = 'block';
+
+      confettiParticles = [];
+      const colors = ['#f59e0b', '#38bdf8', '#10b981', '#fbbf24', '#ec4899', '#a855f7'];
+      for (let i = 0; i < 70; i++) {
+        confettiParticles.push({
+          x: canvas.width * 0.5,
+          y: canvas.height * 0.4,
+          vx: (Math.random() - 0.5) * 12,
+          vy: (Math.random() - 0.8) * 14,
+          size: Math.random() * 8 + 4,
+          color: colors[Math.floor(Math.random() * colors.length)],
+          rotation: Math.random() * 360,
+          vRot: (Math.random() - 0.5) * 8,
+          alpha: 1
+        });
+      }
+
+      const startTime = performance.now();
+      function update() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        let alive = false;
+        confettiParticles.forEach(p => {
+          p.x += p.vx;
+          p.y += p.vy;
+          p.vy += 0.35;
+          p.rotation += p.vRot;
+          p.alpha -= 0.012;
+
+          if (p.alpha > 0) {
+            alive = true;
+            ctx.save();
+            ctx.globalAlpha = p.alpha;
+            ctx.translate(p.x, p.y);
+            ctx.rotate((p.rotation * Math.PI) / 180);
+            ctx.fillStyle = p.color;
+            ctx.fillRect(-p.size / 2, -p.size / 2, p.size, p.size * 0.6);
+            ctx.restore();
+          }
+        });
+
+        if (alive && performance.now() - startTime < 2400) {
+          confettiAnimationId = requestAnimationFrame(update);
+        } else {
+          canvas.style.display = 'none';
+        }
+      }
+      if (confettiAnimationId) cancelAnimationFrame(confettiAnimationId);
+      confettiAnimationId = requestAnimationFrame(update);
+    }
+
+    // ================= ESTADO DE LA APLICACIÓN =================
+    let currentMode = 'tradicional';
+    let rows = 4, cols = 4;
+    let gridNumbers = [];
+    let tradMarked = new Set();
+    let redEliminated = new Set();
+    let redSelected = [];
+    let selectedDigit = null;
+
+    let tradTime = 0, redTime = 0;
+    let timerRunning = false;
+    let timerInterval = null;
+
+    let recordedTradTime = null;
+    let recordedRedTime = null;
+    let feedbackTimeout = null;
+
+    // Generar teclado táctil 0 al 9
+    const keypadGrid = document.getElementById('keypad-grid');
+    for (let i = 0; i <= 9; i++) {
+      const btn = document.createElement('button');
+      btn.className = 'keypad-digit-btn';
+      btn.textContent = i;
+      btn.id = 'digit-btn-' + i;
+      btn.onclick = () => {
+        initAudio();
+        playPopSound();
+        selectDigit(i);
+      };
+      keypadGrid.appendChild(btn);
+    }
+
+    function isTutorialHidden(mode) {
+      return !!(
+        localStorage.getItem('hide_tutorial_' + mode) ||
+        localStorage.getItem('reduccion_hide_tutorial_' + mode)
+      );
+    }
+
+    function selectDigit(d) {
+      if (currentMode === 'tradicional' || currentMode === 'reduccion') {
+        if (!isTutorialHidden(currentMode)) {
+          openTutorialModal();
+          return;
+        }
+      }
+      selectedDigit = d;
+      document.getElementById('digit-preview').textContent = d;
+      document.getElementById('digit-preview').classList.add('active');
+      document.querySelectorAll('.keypad-digit-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('digit-btn-' + d).classList.add('active');
+      document.getElementById('btn-comprobar').disabled = false;
+    }
+
+    function clearDigitSelection() {
+      selectedDigit = null;
+      document.getElementById('digit-preview').textContent = '—';
+      document.getElementById('digit-preview').classList.remove('active');
+      document.querySelectorAll('.keypad-digit-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('btn-comprobar').disabled = true;
+    }
+
+    // Cálculo del número reducido (1 al 9, con equivalencia a 0 en mod 9)
+    function calculateReducedNumber(val) {
+      if (val <= 0) return 0;
+      return ((val - 1) % 9) + 1;
+    }
+
+    function generateNewGrid() {
+      const total = rows * cols;
+      gridNumbers = [];
+      const pairs = [[1,8],[2,7],[3,6],[4,5],[5,4],[6,3],[7,2],[8,1]];
+      let placed = 0;
+
+      // Ceros y nueves
+      const specials = Math.max(2, Math.floor(total * 0.15));
+      for (let i = 0; i < specials && placed < total; i++) {
+        gridNumbers.push(i % 2 === 0 ? 9 : 0);
+        placed++;
+      }
+
+      // Pares que suman 9
+      const pairCount = Math.floor((total - placed) * 0.5 / 2);
+      for (let i = 0; i < pairCount && placed + 2 <= total; i++) {
+        const p = pairs[Math.floor(Math.random() * pairs.length)];
+        gridNumbers.push(p[0], p[1]);
+        placed += 2;
+      }
+
+      // Restantes
+      while (placed < total) {
+        gridNumbers.push(Math.floor(Math.random() * 9) + 1);
+        placed++;
+      }
+
+      // Mezcla de Fisher-Yates
+      for (let i = gridNumbers.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [gridNumbers[i], gridNumbers[j]] = [gridNumbers[j], gridNumbers[i]];
+      }
+
+      tradMarked.clear();
+      redEliminated.clear();
+      redSelected = [];
+      tradTime = 0;
+      redTime = 0;
+      recordedTradTime = null;
+      recordedRedTime = null;
+      stopTimer();
+      clearDigitSelection();
+      updateComparativaView();
+      renderBoard();
+      updateSubBar();
+    }
+
+    function renderBoard() {
+      const board = document.getElementById('grid-board');
+      board.style.gridTemplateColumns = `repeat(${cols}, 1fr)`;
+      board.style.gridTemplateRows = `repeat(${rows}, 1fr)`;
+      board.innerHTML = '';
+
+      gridNumbers.forEach((val, idx) => {
+        const cell = document.createElement('div');
+        cell.className = 'cell';
+        cell.id = 'cell-' + idx;
+        cell.textContent = val;
+
+        if (currentMode === 'tradicional') {
+          if (tradMarked.has(idx)) cell.classList.add('trad-marked');
+          cell.onclick = () => toggleTradCell(idx);
+        } else if (currentMode === 'reduccion') {
+          if (redEliminated.has(idx)) cell.classList.add('eliminated');
+          if (redSelected.includes(idx)) cell.classList.add('selected');
+          cell.onclick = () => handleReduccionCell(idx, val);
+        }
+        board.appendChild(cell);
+      });
+    }
+
+    function toggleTradCell(idx) {
+      if (!isTutorialHidden('tradicional')) {
+        openTutorialModal();
+        return;
+      }
+      initAudio();
+      playPopSound();
+      startTimer();
+      if (tradMarked.has(idx)) {
+        tradMarked.delete(idx);
+      } else {
+        tradMarked.add(idx);
+      }
+      renderBoard();
+      updateSubBar();
+    }
+
+    function showFeedback(msg) {
+      const fb = document.getElementById('selection-feedback');
+      if (feedbackTimeout) clearTimeout(feedbackTimeout);
+      fb.textContent = msg;
+      fb.style.display = 'block';
+      feedbackTimeout = setTimeout(() => {
+        fb.style.display = 'none';
+      }, 1600);
+    }
+
+    function clearManualSelection() {
+      initAudio();
+      playPopSound();
+      redSelected = [];
+      renderBoard();
+      updateSubBar();
+      showFeedback('Selección reiniciada');
+    }
+
+    // ================= MECÁNICA AVANZADA DEL MODO REDUCCIÓN =================
+    function handleReduccionCell(idx, val) {
+      if (!isTutorialHidden('reduccion')) {
+        openTutorialModal();
+        return;
+      }
+      initAudio();
+      startTimer();
+      if (redEliminated.has(idx)) return;
+
+      // 1. Descarte individual directo de 0 o 9
+      if (val === 0 || val === 9) {
+        playHarmonicDiscardSound();
+        redEliminated.add(idx);
+        redSelected = redSelected.filter(i => i !== idx);
+        showFeedback(`✓ ¡Dígito ${val} descartado directo!`);
+        renderBoard();
+        updateSubBar();
+        return;
+      }
+
+      // 2. Si se vuelve a pulsar una celda ya seleccionada, se retira del grupo
+      if (redSelected.includes(idx)) {
+        playPopSound();
+        redSelected = redSelected.filter(i => i !== idx);
+        renderBoard();
+        updateSubBar();
+        return;
+      }
+
+      playPopSound();
+
+      // 3. Agrupaciones libres y sin límite estricto de casillas (2, 3, 4, 5 o más)
+      const newSel = [...redSelected, idx];
+      const sum = newSel.reduce((acc, i) => acc + gridNumbers[i], 0);
+
+      // Regla de reducción a 9: si la suma es 9 o su número reducido da 9 (ej. 18, 27, 36...)
+      const reducesToNine = (sum > 0 && sum % 9 === 0);
+
+      if (reducesToNine && newSel.length >= 2) {
+        playHarmonicDiscardSound();
+        newSel.forEach(i => redEliminated.add(i));
+        redSelected = [];
+        showFeedback(sum === 9 ? '✓ ¡Suma 9 descartada!' : `✓ ¡Suma ${sum} reduce a 9 y se descarta!`);
+      } else {
+        redSelected = newSel;
+        const currentReduced = calculateReducedNumber(sum);
+        showFeedback(`Suma: ${sum} (Reducido: ${currentReduced})...`);
+      }
+
+      renderBoard();
+      updateSubBar();
+    }
+
+    function startTimer() {
+      if (timerRunning) return;
+      timerRunning = true;
+      timerInterval = setInterval(() => {
+        if (currentMode === 'tradicional') tradTime = +(tradTime + 0.1).toFixed(1);
+        if (currentMode === 'reduccion') redTime = +(redTime + 0.1).toFixed(1);
+        updateStopwatch();
+      }, 100);
+    }
+
+    function stopTimer() {
+      timerRunning = false;
+      if (timerInterval) clearInterval(timerInterval);
+    }
+
+    function updateStopwatch() {
+      const t = currentMode === 'tradicional' ? tradTime : redTime;
+      document.getElementById('stopwatch-display').textContent = t.toFixed(1) + 's';
+    }
+
+    function updateSubBar() {
+      updateStopwatch();
+      const total = rows * cols;
+      document.getElementById('total-count-label').textContent = total;
+      const controlsBar = document.getElementById('reduction-controls-bar');
+      const hint = document.getElementById('reduction-status-hint');
+
+      if (currentMode === 'tradicional') {
+        controlsBar.style.display = 'none';
+        document.getElementById('counter-display').innerHTML =
+          `Sumadas: <strong style="color: #fbbf24;">${tradMarked.size}</strong> / ${total}`;
+      } else {
+        controlsBar.style.display = 'flex';
+        const sum = redSelected.reduce((acc, i) => acc + gridNumbers[i], 0);
+        if (redSelected.length > 0) {
+          hint.textContent = `Seleccionadas: ${redSelected.length} (Suma: ${sum})`;
+        } else {
+          hint.textContent = 'Toca 0, 9 o agrupa casillas libremente';
+        }
+
+        document.getElementById('counter-display').innerHTML =
+          `Tachadas: <strong style="color: #10b981;">${redEliminated.size}</strong> / ${total}`;
+      }
+    }
+
+    function resetCurrentAttempt() {
+      initAudio();
+      playPopSound();
+      stopTimer();
+      if (currentMode === 'tradicional') {
+        tradTime = 0;
+        tradMarked.clear();
+      } else if (currentMode === 'reduccion') {
+        redTime = 0;
+        redEliminated.clear();
+        redSelected = [];
+      }
+      clearDigitSelection();
+      renderBoard();
+      updateSubBar();
+    }
+
+    function switchMode(mode) {
+      initAudio();
+      stopTimer();
+      currentMode = mode;
+      document.querySelectorAll('.mode-btn').forEach(b => b.classList.remove('active'));
+      document.getElementById('nav-' + mode).classList.add('active');
+
+      const boardArea = document.getElementById('board-container');
+      const subBar = document.getElementById('sub-bar');
+      const keypad = document.getElementById('keypad-bar');
+      const compView = document.getElementById('comparativa-view');
+
+      if (mode === 'comparativa') {
+        boardArea.style.display = 'none';
+        subBar.style.display = 'none';
+        keypad.style.display = 'none';
+        compView.style.display = 'flex';
+        updateComparativaView();
+      } else {
+        boardArea.style.display = 'flex';
+        subBar.style.display = 'flex';
+        keypad.style.display = 'flex';
+        compView.style.display = 'none';
+        clearDigitSelection();
+        renderBoard();
+        updateSubBar();
+
+        if (!isTutorialHidden(mode)) {
+          openTutorialModal();
+        }
+      }
+    }
+
+    function checkAnswer() {
+      if (selectedDigit === null) return;
+      initAudio();
+      stopTimer();
+
+      const totalSum = gridNumbers.reduce((a, b) => a + b, 0);
+      const reduced = calculateReducedNumber(totalSum);
+      const isCorrect = (selectedDigit === reduced) || (reduced === 9 && selectedDigit === 0);
+
+      const time = currentMode === 'tradicional' ? tradTime : redTime;
+      if (isCorrect) {
+        playVictoryFanfare();
+        launchConfetti();
+        if (currentMode === 'tradicional') recordedTradTime = time;
+        if (currentMode === 'reduccion') recordedRedTime = time;
+      } else {
+        playErrorSound();
+      }
+
+      const resTitle = document.getElementById('result-title');
+      const resBody = document.getElementById('result-body');
+      resTitle.textContent = isCorrect ? '¡Número Reducido Correcto! ✓' : 'Número Reducido Incorrecto ✗';
+      resTitle.style.color = isCorrect ? '#10b981' : '#ef4444';
+
+      resBody.innerHTML = `
+        <div style="background:#0c0a09; padding:12px; border-radius:10px; border:1px solid #292524;">
+          <div style="display:flex; justify-content:space-between; margin-bottom:6px;">
+            <span>Tiempo: <strong style="color:#fcd34d;">${time.toFixed(1)}s</strong></span>
+            <span>Tu respuesta: <strong style="color:${isCorrect ? '#10b981':'#ef4444'}">${selectedDigit}</strong></span>
+          </div>
+          <div style="font-size:12px; color:#a8a29e; border-top:1px solid #292524; padding-top:6px;">
+            Suma total = ${totalSum} → Número reducido = <strong>${reduced}</strong>
+          </div>
+        </div>
+      `;
+
+      document.getElementById('result-modal').classList.add('show');
+    }
+
+    function updateComparativaView() {
+      document.getElementById('stat-trad-time').textContent = recordedTradTime ? recordedTradTime.toFixed(1) + 's' : '—';
+      document.getElementById('stat-trad-status').textContent = recordedTradTime ? 'Completado' : 'Pendiente';
+      document.getElementById('stat-trad-status').style.color = recordedTradTime ? '#10b981' : '#78716c';
+
+      document.getElementById('stat-red-time').textContent = recordedRedTime ? recordedRedTime.toFixed(1) + 's' : '—';
+      document.getElementById('stat-red-status').textContent = recordedRedTime ? 'Completado' : 'Pendiente';
+      document.getElementById('stat-red-status').style.color = recordedRedTime ? '#10b981' : '#78716c';
+
+      const box = document.getElementById('comparison-result-box');
+      if (recordedTradTime && recordedRedTime) {
+        const saved = (recordedTradTime - recordedRedTime).toFixed(1);
+        const pct = Math.round(((recordedTradTime - recordedRedTime) / recordedTradTime) * 100);
+        document.getElementById('comp-headline').textContent =
+          pct > 0 ? `¡${pct}% más rápido con Reducción! (${saved}s ahorrados)` : `Comparativa completada`;
+        box.style.display = 'block';
+      } else {
+        box.style.display = 'none';
+      }
+    }
+
+    function hideSplash() {
+      initAudio();
+      playPopSound();
+      document.getElementById('splash-screen').style.display = 'none';
+      if (!isTutorialHidden('tradicional')) {
+        openTutorialModal();
+      }
+    }
+
+    function showSplash() {
+      initAudio();
+      playPopSound();
+      document.getElementById('splash-screen').style.display = 'flex';
+    }
+
+    // ================= TUTORIALES EN 2 FASES (EXPLICACIÓN + PRÁCTICA) =================
+    let tutorialPhase = 1; // 1 = Explicación Previa, 2 = Práctica Guiada
+    let demoTradMarked = new Set();
+    let demoRedEliminated = new Set();
+    let demoRedSelected = [];
+
+    function openTutorialModal() {
+      initAudio();
+      playPopSound();
+      tutorialPhase = 1;
+      demoTradMarked.clear();
+      demoRedEliminated.clear();
+      demoRedSelected = [];
+      const chk = document.getElementById('check-dont-show');
+      if (chk) chk.checked = false;
+      renderTutorialView();
+      document.getElementById('tutorial-modal').classList.add('show');
+    }
+
+    function setTutorialPhase(phase) {
+      initAudio();
+      playPopSound();
+      tutorialPhase = phase;
+      renderTutorialView();
+    }
+
+    function renderTutorialView() {
+      const container = document.getElementById('tutorial-content-body');
+      const isTrad = currentMode === 'tradicional';
+      const title = document.getElementById('tutorial-title');
+      title.textContent = isTrad ? 'Tutorial: Modo Tradicional' : 'Tutorial: Modo Reducción';
+
+      if (isTrad) {
+        if (tutorialPhase === 1) {
+          // Fase 1 Tradicional: Explicación Conceptual Previa
+          container.innerHTML = `
+            <div style="font-size: 13px; color: #d6d3d1; line-height: 1.5; display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span class="step-badge">Fase 1 de 2: Explicación Conceptual</span>
+              </div>
+              <p>
+                En el <strong>Modo Tradicional</strong>, debes sumar mentalmente los números de toda la cuadrícula tal como aprendiste en la escuela:
+              </p>
+              <div style="background: #0c0a09; padding: 10px; border-radius: 10px; border: 1px solid #292524; font-size: 12px;">
+                <div style="color: #fbbf24; font-weight: 700; margin-bottom: 4px;">¿Cómo funciona el cálculo?</div>
+                <p style="color: #a8a29e;">
+                  1. Sumas todos los dígitos hasta obtener el total (por ejemplo: <strong>14</strong>).<br/>
+                  2. Reduces el total sumando sus cifras hasta que quede un solo dígito: 1 + 4 = <strong>5</strong>.<br/>
+                  3. A este dígito final se le llama <strong>número reducido</strong>.
+                </p>
+              </div>
+              <p style="font-size: 12px; color: #a8a29e;">
+                Para no perderte, puedes ir tocando cada casilla para marcarla en color amarillo cálido y con una tilde de verificación conforme avances.
+              </p>
+              <button class="btn-comenzar" style="font-size: 13px; padding: 10px; justify-content: center; margin-top: 4px;" onclick="setTutorialPhase(2)">
+                Siguiente: Práctica Guiada →
+              </button>
+            </div>
+          `;
+        } else {
+          // Fase 2 Tradicional: Práctica Interactiva Guiada
+          container.innerHTML = `
+            <div style="font-size: 13px; color: #d6d3d1; line-height: 1.5; display: flex; flex-direction: column; gap: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span class="step-badge">Fase 2 de 2: Práctica Guiada</span>
+                <button style="background:none; border:none; color:#a8a29e; font-size:11px; cursor:pointer; text-decoration:underline;" onclick="setTutorialPhase(1)">← Volver a explicación</button>
+              </div>
+              <p>Toca cada casilla del mini-tablero para marcarla mientras calculas:</p>
+              <div class="demo-grid-2x2">
+                <div class="demo-cell ${demoTradMarked.has(0)?'trad-marked':''}" onclick="demoToggleTrad(0)">3</div>
+                <div class="demo-cell ${demoTradMarked.has(1)?'trad-marked':''}" onclick="demoToggleTrad(1)">4</div>
+                <div class="demo-cell ${demoTradMarked.has(2)?'trad-marked':''}" onclick="demoToggleTrad(2)">2</div>
+                <div class="demo-cell ${demoTradMarked.has(3)?'trad-marked':''}" onclick="demoToggleTrad(3)">5</div>
+              </div>
+              <div style="text-align: center; font-size: 12px; color: #fbbf24; min-height: 18px;">
+                ${demoTradMarked.size === 0 ? 'Toca cualquier número arriba para practicar el sombreado.' : `Has sumado y marcado ${demoTradMarked.size} de 4 celdas.`}
+              </div>
+              <div style="background: #0c0a09; padding: 8px; border-radius: 8px; border: 1px solid #292524; font-size: 11.5px; color: #d6d3d1;">
+                Suma: 3 + 4 + 2 + 5 = 14 → Reducción: 1 + 4 = <strong style="color:#fbbf24;">5</strong>.
+              </div>
+              <button class="btn-comenzar" style="font-size: 13px; padding: 10px; justify-content: center; margin-top: 4px;" onclick="closeTutorial()">
+                Comenzar actividad
+              </button>
+            </div>
+          `;
+        }
+      } else {
+        // Reducción
+        if (tutorialPhase === 1) {
+          // Fase 1 Reducción: Explicación Conceptual Previa
+          container.innerHTML = `
+            <div style="font-size: 13px; color: #d6d3d1; line-height: 1.5; display: flex; flex-direction: column; gap: 10px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span class="step-badge">Fase 1 de 2: Explicación Conceptual</span>
+              </div>
+              <p>
+                El <strong>Modo Reducción</strong> es una técnica de agilidad mental para calcular el <strong>número reducido</strong> sin sumar números grandes ni arrastrar decenas.
+              </p>
+              <div style="background: #0c0a09; padding: 10px; border-radius: 10px; border: 1px solid #292524; font-size: 12px;">
+                <div style="color: #38bdf8; font-weight: 700; margin-bottom: 4px;">Reglas de oro del 9:</div>
+                <p style="color: #a8a29e;">
+                  1. <strong>Ceros y Nueves:</strong> Se descartan de inmediato porque no alteran el número reducido final.<br/>
+                  2. <strong>Grupos que sumen 9:</strong> Puedes tocar 2, 3 o más casillas. Si su suma directa o reducida es 9 (ej. 5+4=9, o 6+6+6=18=9), se anulan juntas.<br/>
+                  3. <strong>Residuos:</strong> Al anular todos los 9s, solo te queda sumar los pocos números que queden libres.
+                </p>
+              </div>
+              <p style="font-size: 12px; color: #a8a29e;">
+                ¡Vamos a practicarlo en vivo en el siguiente paso interactivo!
+              </p>
+              <button class="btn-comenzar" style="font-size: 13px; padding: 10px; justify-content: center; margin-top: 4px;" onclick="setTutorialPhase(2)">
+                Siguiente: Práctica Guiada →
+              </button>
+            </div>
+          `;
+        } else {
+          // Fase 2 Reducción: Práctica Interactiva Guiada
+          container.innerHTML = `
+            <div style="font-size: 13px; color: #d6d3d1; line-height: 1.5; display: flex; flex-direction: column; gap: 8px;">
+              <div style="display: flex; justify-content: space-between; align-items: center;">
+                <span class="step-badge">Fase 2 de 2: Práctica Guiada</span>
+                <button style="background:none; border:none; color:#a8a29e; font-size:11px; cursor:pointer; text-decoration:underline;" onclick="setTutorialPhase(1)">← Volver a explicación</button>
+              </div>
+              <p>Prueba en este mini-tablero las dos acciones principales:</p>
+              <div class="demo-grid-2x2">
+                <div class="demo-cell ${demoRedEliminated.has(0)?'eliminated':''}" onclick="demoClickRed(0, 9)">9</div>
+                <div class="demo-cell ${demoRedEliminated.has(1)?'eliminated':(demoRedSelected.includes(1)?'selected':'')}" onclick="demoClickRed(1, 5)">5</div>
+                <div class="demo-cell ${demoRedEliminated.has(2)?'eliminated':(demoRedSelected.includes(2)?'selected':'')}" onclick="demoClickRed(2, 4)">4</div>
+                <div class="demo-cell ${demoRedEliminated.has(3)?'eliminated':''}" onclick="demoClickRed(3, 0)">0</div>
+              </div>
+              <div id="demo-red-msg" style="text-align: center; font-size: 12px; color: #38bdf8; min-height: 18px;">
+                Toca el 9 o el 0 para descarte directo, o toca el 5 y luego el 4.
+              </div>
+              <p style="font-size: 11.5px; color: #a8a29e;">
+                Si tocas números que suman menos de 9, seguirán activos esperando más toques sin bloquearte.
+              </p>
+              <button class="btn-comenzar" style="font-size: 13px; padding: 10px; justify-content: center; margin-top: 4px;" onclick="closeTutorial()">
+                Comenzar actividad
+              </button>
+            </div>
+          `;
+        }
+      }
+    }
+
+    function demoToggleTrad(idx) {
+      initAudio();
+      playPopSound();
+      if (demoTradMarked.has(idx)) demoTradMarked.delete(idx);
+      else demoTradMarked.add(idx);
+      renderTutorialView();
+    }
+
+    function demoClickRed(idx, val) {
+      initAudio();
+      if (demoRedEliminated.has(idx)) return;
+      if (val === 0 || val === 9) {
+        playHarmonicDiscardSound();
+        demoRedEliminated.add(idx);
+        demoRedSelected = demoRedSelected.filter(i => i !== idx);
+        renderTutorialView();
+        const msg = document.getElementById('demo-red-msg');
+        if (msg) msg.textContent = `✓ ¡${val} descartado directo!`;
+        return;
+      }
+      playPopSound();
+      if (demoRedSelected.includes(idx)) {
+        demoRedSelected = demoRedSelected.filter(i => i !== idx);
+        renderTutorialView();
+        return;
+      }
+      const newSel = [...demoRedSelected, idx];
+      const vals = { 1: 5, 2: 4 };
+      const sum = newSel.reduce((a, b) => a + vals[b], 0);
+
+      if (sum === 9) {
+        playHarmonicDiscardSound();
+        newSel.forEach(i => demoRedEliminated.add(i));
+        demoRedSelected = [];
+        renderTutorialView();
+        const msg = document.getElementById('demo-red-msg');
+        if (msg) msg.textContent = '✓ ¡Excelente! 5 + 4 = 9 descartados juntos.';
+      } else {
+        demoRedSelected = newSel;
+        renderTutorialView();
+        const msg = document.getElementById('demo-red-msg');
+        if (msg) msg.textContent = `Suma acumulada: ${sum}... esperando otro número.`;
+      }
+    }
+
+    function closeTutorial() {
+      initAudio();
+      playPopSound();
+      const chk = document.getElementById('check-dont-show');
+      if (chk && chk.checked) {
+        localStorage.setItem('hide_tutorial_' + currentMode, 'true');
+        localStorage.setItem('reduccion_hide_tutorial_' + currentMode, 'true');
+      }
+      document.getElementById('tutorial-modal').classList.remove('show');
+    }
+
+    function openDimensionsModal() {
+      initAudio();
+      playPopSound();
+      document.getElementById('dims-modal').classList.add('show');
+    }
+
+    function closeDimensionsModal() {
+      initAudio();
+      playPopSound();
+      document.getElementById('dims-modal').classList.remove('show');
+    }
+
+    function setDimensions(r, c) {
+      initAudio();
+      playPopSound();
+      rows = r;
+      cols = c;
+      document.getElementById('btn-dims').textContent = `${r}×${c}`;
+      closeDimensionsModal();
+      generateNewGrid();
+    }
+
+    function closeResultModal() {
+      initAudio();
+      playPopSound();
+      document.getElementById('result-modal').classList.remove('show');
+    }
+
+    // Inicializar cuadrícula al cargar
+    generateNewGrid();
+  </script>
+
+  <!-- =========================================================
+       MÓDULO DE AUTENTICACIÓN Y VALIDACIÓN CON FIREBASE COMPAT V10
+       ========================================================= -->
+  <script>
+    /* =========================================================
+       1. CONFIGURACIÓN EDITABLE DE FIREBASE (RTDB & CLOUD FIRESTORE)
+       ========================================================= */
+    const _fbKeyPart1 = "AIza";
+    const _fbKeyPart2 = "SyACxGWJBhaeKo4lz015Lz691L4gpHLLHRtM";
+    const _fbKey = _fbKeyPart1 + _fbKeyPart2;
+
+    const firebaseConfig = {
+      apiKey: _fbKey,
+      authDomain: "reduccion-cuadricula-3f6b0.firebaseapp.com",
+      databaseURL: "https://reduccion-cuadricula-3f6b0-default-rtdb.firebaseio.com",
+      projectId: "reduccion-cuadricula-3f6b0",
+      storageBucket: "reduccion-cuadricula-3f6b0.firebasestorage.app",
+      messagingSenderId: "143509305132",
+      appId: "1:143509305132:web:8c8faaa929b39cda1cde89"
+    };
+
+    let fbDb = null;
+    let fbFs = null;
+
+    try {
+      if (typeof firebase !== 'undefined') {
+        const app = !firebase.apps.length ? firebase.initializeApp(firebaseConfig) : firebase.app();
+        fbDb = firebase.database(app);
+        fbFs = firebase.firestore(app);
+        console.log("Firebase Realtime Database y Cloud Firestore conectados en Reducción Cuadrícula.");
+      }
+    } catch (e) {
+      console.warn("Error iniciando Firebase:", e);
+    }
+
+    /* =========================================================
+       SISTEMA INSTITUCIONAL DE AUTENTICACIÓN Y LICENCIAS (FIRESTORE)
+       ========================================================= */
+    const AUTH_STORAGE_KEY = 'auth_token_reduccion';
+    let currentValidCode = '';
+
+    const authModalEl = document.getElementById('modal-validacion-acceso');
+    const appContainer = document.getElementById('app-container');
+    const sessionBar = document.getElementById('auth-session-bar');
+    const userDisplay = document.getElementById('auth-user-display');
+    const authErrorAlertEl = document.getElementById('auth-error-alert');
+    const authErrorTextEl = document.getElementById('auth-error-text');
+
+    const tabAuthLoginBtn = document.getElementById('tab-auth-login');
+    const tabAuthRedeemBtn = document.getElementById('tab-auth-redeem');
+    const formAuthLogin = document.getElementById('form-auth-login');
+    const sectionAuthRedeem = document.getElementById('section-auth-redeem');
+
+    const formRedeemStepA = document.getElementById('form-redeem-step-a');
+    const formRedeemStepB = document.getElementById('form-redeem-step-b');
+    const inputRedeemCode = document.getElementById('redeem-code');
+    const inputLoginEmail = document.getElementById('login-email');
+    const inputLoginPass = document.getElementById('login-password');
+    const inputRegEmail = document.getElementById('reg-email');
+    const inputRegPass = document.getElementById('reg-password');
+
+    const btnSubmitLogin = document.getElementById('btn-submit-login');
+    const btnVerifyCode = document.getElementById('btn-verify-code');
+    const btnActivateAccount = document.getElementById('btn-activate-account');
+    const btnLogout = document.getElementById('btn-auth-logout');
+
+    function isStudentUrlException() {
+      const p = new URLSearchParams(window.location.search);
+      return (
+        p.has('sala') ||
+        p.has('room') ||
+        p.get('role') === 'alumno' ||
+        p.get('role') === 'student' ||
+        p.has('alumno') ||
+        p.has('student') ||
+        p.has('seed')
+      );
+    }
+
+    function showAuthError(msg) {
+      if (!authErrorAlertEl || !authErrorTextEl) return;
+      authErrorTextEl.textContent = msg;
+      authErrorAlertEl.style.display = 'flex';
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    function clearAuthError() {
+      if (!authErrorAlertEl || !authErrorTextEl) return;
+      authErrorTextEl.textContent = '';
+      authErrorAlertEl.style.display = 'none';
+    }
+
+    function unlockApp(identifier) {
+      if (authModalEl) {
+        authModalEl.classList.add('hidden');
+        authModalEl.style.display = 'none';
+      }
+      if (appContainer) {
+        appContainer.classList.remove('hidden');
+        appContainer.style.display = 'flex';
+      }
+      if (!isStudentUrlException() && sessionBar) {
+        sessionBar.classList.remove('hidden');
+        if (userDisplay) userDisplay.textContent = identifier || 'Docente Autorizado';
+      }
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    function lockApp() {
+      if (authModalEl) {
+        authModalEl.classList.remove('hidden');
+        authModalEl.style.display = 'flex';
+      }
+      if (appContainer) {
+        appContainer.classList.add('hidden');
+        appContainer.style.display = 'none';
+      }
+      if (sessionBar) sessionBar.classList.add('hidden');
+      clearAuthError();
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    // Inicialización del estado de autenticación al cargar
+    if (isStudentUrlException()) {
+      unlockApp('Modo Alumno');
+    } else {
+      const savedAuth = localStorage.getItem(AUTH_STORAGE_KEY);
+      if (savedAuth) {
+        try {
+          const parsed = JSON.parse(savedAuth);
+          unlockApp(parsed.identifier || parsed.correo || parsed.email || parsed.code || 'Docente');
+        } catch {
+          unlockApp(savedAuth);
+        }
+      } else {
+        lockApp();
+      }
+    }
+
+    // Alternar pestañas del modal
+    if (tabAuthLoginBtn && tabAuthRedeemBtn) {
+      tabAuthLoginBtn.addEventListener('click', () => {
+        tabAuthLoginBtn.classList.add('active');
+        tabAuthRedeemBtn.classList.remove('active');
+        if (formAuthLogin) formAuthLogin.style.display = 'flex';
+        if (sectionAuthRedeem) sectionAuthRedeem.style.display = 'none';
+        clearAuthError();
+        if (window.lucide) window.lucide.createIcons();
+      });
+
+      tabAuthRedeemBtn.addEventListener('click', () => {
+        tabAuthRedeemBtn.classList.add('active');
+        tabAuthLoginBtn.classList.remove('active');
+        if (formAuthLogin) formAuthLogin.style.display = 'none';
+        if (sectionAuthRedeem) sectionAuthRedeem.style.display = 'flex';
+        if (formRedeemStepA) formRedeemStepA.style.display = 'block';
+        if (formRedeemStepB) formRedeemStepB.style.display = 'none';
+        clearAuthError();
+        if (window.lucide) window.lucide.createIcons();
+      });
+    }
+
+    // Auto-formato en mayúsculas y sin espacios para código de activación
+    if (inputRedeemCode) {
+      inputRedeemCode.addEventListener('input', (e) => {
+        e.target.value = e.target.value.replace(/\s+/g, '').toUpperCase();
+        clearAuthError();
+      });
+    }
+
+    // Pestaña 1: Iniciar Sesión con Cloud Firestore
+    if (formAuthLogin) {
+      formAuthLogin.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = (inputLoginEmail.value || '').trim().toLowerCase();
+        const pass = inputLoginPass.value || '';
+
+        if (!email || !pass) {
+          showAuthError('Ingresa tu correo y contraseña.');
+          return;
+        }
+
+        if (!fbFs) {
+          showAuthError('Error: Cloud Firestore no está disponible. Revisa tu conexión.');
+          return;
+        }
+
+        btnSubmitLogin.disabled = true;
+        const originalContent = btnSubmitLogin.innerHTML;
+        btnSubmitLogin.innerHTML = '<span>Verificando credenciales...</span>';
+        clearAuthError();
+
+        try {
+          const userDoc = await fbFs.collection('usuarios').doc(email).get();
+          if (!userDoc.exists) {
+            showAuthError('Usuario no registrado. Si tienes una licencia, canjéala en la otra pestaña.');
+            return;
+          }
+
+          const userData = userDoc.data();
+          if (userData.password !== pass) {
+            showAuthError('Contraseña incorrecta. Inténtalo nuevamente.');
+            return;
+          }
+
+          const sessionData = {
+            type: 'email',
+            identifier: email,
+            codigoUsado: userData.codigoUsado || '',
+            loginAt: new Date().toISOString()
+          };
+          localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(sessionData));
+          unlockApp(email);
+        } catch (err) {
+          console.error(err);
+          showAuthError('Error al conectar con Firestore: ' + (err.message || 'Verifica tu conexión.'));
+        } finally {
+          btnSubmitLogin.disabled = false;
+          btnSubmitLogin.innerHTML = originalContent;
+          if (window.lucide) window.lucide.createIcons();
+        }
+      });
+    }
+
+    // Pestaña 2 - Paso A: Validar Código en suscripciones
+    if (formRedeemStepA) {
+      formRedeemStepA.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const code = (inputRedeemCode.value || '').replace(/\s+/g, '').toUpperCase();
+
+        if (!code) {
+          showAuthError('Por favor ingresa un código de activación.');
+          return;
+        }
+
+        if (!fbFs) {
+          showAuthError('Error: Cloud Firestore no está disponible. Revisa tu conexión.');
+          return;
+        }
+
+        btnVerifyCode.disabled = true;
+        const originalText = btnVerifyCode.innerHTML;
+        btnVerifyCode.innerHTML = '<span>Validando código...</span>';
+        clearAuthError();
+
+        try {
+          const subDoc = await fbFs.collection('suscripciones').doc(code).get();
+          if (!subDoc.exists) {
+            showAuthError('El código ingresado no existe en el sistema.');
+            return;
+          }
+
+          const subData = subDoc.data() || {};
+          if (subData.activo === false || subData.usado === true || (subData.usadoPor && subData.usadoPor.trim() !== '')) {
+            showAuthError('Este código de activación ya fue utilizado o se encuentra inactivo.');
+            return;
+          }
+
+          const duracion = Number(subData.duracionDias) || 30;
+          const expDate = new Date();
+          expDate.setDate(expDate.getDate() + duracion);
+
+          const formattedExp = expDate.toLocaleDateString('es-ES', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric'
+          });
+
+          currentValidCode = code;
+          const expTextEl = document.getElementById('license-expiration-text');
+          if (expTextEl) expTextEl.textContent = formattedExp;
+
+          formRedeemStepA.style.display = 'none';
+          formRedeemStepB.style.display = 'block';
+          clearAuthError();
+          if (window.lucide) window.lucide.createIcons();
+        } catch (err) {
+          console.error(err);
+          showAuthError('Error al validar código: ' + (err.message || 'Verifica tu conexión.'));
+        } finally {
+          btnVerifyCode.disabled = false;
+          btnVerifyCode.innerHTML = originalText;
+          if (window.lucide) window.lucide.createIcons();
+        }
+      });
+    }
+
+    // Pestaña 2 - Paso B: Registrar Usuario y Quemar Código
+    if (formRedeemStepB) {
+      formRedeemStepB.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = (inputRegEmail.value || '').trim().toLowerCase();
+        const pass = inputRegPass.value || '';
+
+        if (!email || !pass) {
+          showAuthError('Completa todos los campos del registro.');
+          return;
+        }
+
+        if (pass.length < 6) {
+          showAuthError('La contraseña debe tener un mínimo de 6 caracteres.');
+          return;
+        }
+
+        if (!currentValidCode) {
+          showAuthError('Código de licencia no encontrado. Vuelve al paso anterior.');
+          formRedeemStepA.style.display = 'block';
+          formRedeemStepB.style.display = 'none';
+          return;
+        }
+
+        if (!fbFs) {
+          showAuthError('Error: Cloud Firestore no está disponible.');
+          return;
+        }
+
+        btnActivateAccount.disabled = true;
+        const originalContent = btnActivateAccount.innerHTML;
+        btnActivateAccount.innerHTML = '<span>Activando licencia y creando usuario...</span>';
+        clearAuthError();
+
+        try {
+          const userDoc = await fbFs.collection('usuarios').doc(email).get();
+          if (userDoc.exists) {
+            showAuthError('Este correo ya se encuentra registrado. Inicia sesión en la pestaña principal.');
+            return;
+          }
+
+          const deviceId = 'dev_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+          const isoNow = new Date().toISOString();
+
+          await fbFs.collection('usuarios').doc(email).set({
+            correo: email,
+            password: pass,
+            codigoUsado: currentValidCode,
+            deviceIdAutorizado: deviceId,
+            registradoEl: isoNow
+          });
+
+          await fbFs.collection('suscripciones').doc(currentValidCode).update({
+            usado: true,
+            usadoPor: email,
+            fechaActivacion: isoNow
+          });
+
+          const sessionData = {
+            type: 'email',
+            identifier: email,
+            codigoUsado: currentValidCode,
+            loginAt: isoNow
+          };
+          localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(sessionData));
+          unlockApp(email);
+        } catch (err) {
+          console.error(err);
+          showAuthError('Error al activar la licencia: ' + (err.message || 'Verifica tu conexión.'));
+        } finally {
+          btnActivateAccount.disabled = false;
+          btnActivateAccount.innerHTML = originalContent;
+          if (window.lucide) window.lucide.createIcons();
+        }
+      });
+    }
+
+    // Botón Cerrar Sesión en barra superior
+    if (btnLogout) {
+      btnLogout.addEventListener('click', () => {
+        localStorage.removeItem(AUTH_STORAGE_KEY);
+        lockApp();
+      });
+    }
+
+    // Inicializar íconos Lucide
+    if (window.lucide) {
+      window.lucide.createIcons();
+    }
+  </script>
+</body>
+</html>

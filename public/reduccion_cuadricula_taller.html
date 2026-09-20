@@ -1,0 +1,3251 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+  <title>Reducción Cuadrícula - Modo Taller / Competencia</title>
+  <meta name="description" content="Plataforma interactiva en tiempo real para talleres y competencias de agilidad mental y número reducido." />
+  
+  <!-- Fuentes Google: Cinzel para títulos épicos, Outfit para UI moderna -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700;800;900&family=Outfit:wght@400;500;600;700;800&family=Caveat:wght@700&display=swap" rel="stylesheet">
+  
+  <!-- Librería QRCode.js vía CDN -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  
+  <!-- Librería Canvas Confetti vía CDN -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  
+  <!-- Firebase Realtime Database & Cloud Firestore SDK (Compat v10) vía CDN -->
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-database-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/10.14.1/firebase-firestore-compat.js"></script>
+
+  <!-- Lucide Icons CDN -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <style>
+    /* =========================================================
+       RESET Y VARIABLES GLOBALES
+       ========================================================= */
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+      user-select: none;
+      -webkit-user-select: none;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    :root {
+      --bg-dark: #030712;
+      --bg-card: #0f172a;
+      --bg-surface: #1e293b;
+      --border-subtle: #334155;
+      --border-glow: rgba(59, 130, 246, 0.4);
+      --accent-blue: #3b82f6;
+      --accent-indigo: #6366f1;
+      --accent-amber: #f59e0b;
+      --accent-emerald: #10b981;
+      --accent-red: #ef4444;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --font-display: 'Cinzel', serif;
+      --font-ui: 'Outfit', -apple-system, BlinkMacSystemFont, sans-serif;
+    }
+
+    html, body {
+      width: 100%;
+      height: 100%;
+      height: 100dvh;
+      overflow: hidden;
+      background-color: var(--bg-dark);
+      color: var(--text-main);
+      font-family: var(--font-ui);
+      touch-action: manipulation;
+    }
+
+    /* Fondo radial con efecto ambiental y círculos flotantes */
+    .ambient-bg {
+      position: fixed;
+      inset: 0;
+      background: radial-gradient(ellipse at 50% 20%, #1e3a8a 0%, #0f172a 45%, #030712 90%);
+      z-index: 0;
+      overflow: hidden;
+      pointer-events: none;
+    }
+
+    .floating-circle {
+      position: absolute;
+      border-radius: 50%;
+      filter: blur(50px);
+      opacity: 0.28;
+    }
+
+    .circle-1 {
+      width: 420px;
+      height: 420px;
+      background: #2563eb;
+      top: -100px;
+      left: -100px;
+      animation: floatCircle1 18s ease-in-out infinite alternate;
+    }
+
+    .circle-2 {
+      width: 460px;
+      height: 460px;
+      background: #7c3aed;
+      top: 35%;
+      right: -120px;
+      animation: floatCircle2 22s ease-in-out infinite alternate;
+    }
+
+    .circle-3 {
+      width: 380px;
+      height: 380px;
+      background: #f59e0b;
+      bottom: -100px;
+      left: 20%;
+      animation: floatCircle3 20s ease-in-out infinite alternate;
+    }
+
+    @keyframes floatCircle1 {
+      0% { transform: translate(0, 0) scale(1); }
+      100% { transform: translate(60px, 80px) scale(1.15); }
+    }
+    @keyframes floatCircle2 {
+      0% { transform: translate(0, 0) scale(1); }
+      100% { transform: translate(-80px, -50px) scale(0.9); }
+    }
+    @keyframes floatCircle3 {
+      0% { transform: translate(0, 0) scale(1); }
+      100% { transform: translate(40px, -60px) scale(1.1); }
+    }
+
+    /* Contenedor principal de vistas */
+    #app-viewport {
+      position: relative;
+      z-index: 1;
+      width: 100%;
+      height: 100%;
+      height: 100dvh;
+      max-height: 100dvh;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+
+    /* Clases de utilidad para transiciones de vista */
+    .hidden {
+      display: none !important;
+    }
+    .view-screen {
+      display: none;
+      width: 100%;
+      height: 100%;
+      height: 100dvh;
+      flex-direction: column;
+      overflow: hidden;
+      animation: fadeIn 0.25s ease-out;
+    }
+    .view-screen.active {
+      display: flex;
+    }
+    .teacher-stage {
+      width: 100%;
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      animation: fadeIn 0.25s ease-out;
+      overflow-y: auto;
+    }
+    .teacher-stage.hidden {
+      display: none !important;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; transform: scale(0.985); }
+      to { opacity: 1; transform: scale(1); }
+    }
+
+    /* Componentes UI reutilizables */
+    .btn-primary {
+      background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+      color: #030712;
+      font-weight: 800;
+      font-size: 0.95rem;
+      padding: 0.75rem 1.5rem;
+      border-radius: 0.85rem;
+      border: none;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      box-shadow: 0 4px 15px rgba(245, 158, 11, 0.25);
+      transition: all 0.15s ease;
+    }
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 20px rgba(245, 158, 11, 0.4);
+    }
+    .btn-primary:active {
+      transform: translateY(1px);
+    }
+
+    .btn-secondary {
+      background: rgba(30, 41, 59, 0.9);
+      color: var(--text-main);
+      font-weight: 600;
+      font-size: 0.9rem;
+      padding: 0.65rem 1.25rem;
+      border-radius: 0.75rem;
+      border: 1px solid var(--border-subtle);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      transition: all 0.15s ease;
+    }
+    .btn-secondary:hover {
+      background: #334155;
+      border-color: #64748b;
+    }
+
+    .btn-danger-subtle {
+      background: rgba(30, 41, 59, 0.85);
+      color: #fca5a5;
+      font-weight: 700;
+      font-size: 0.85rem;
+      padding: 0.65rem 1.15rem;
+      border-radius: 0.75rem;
+      border: 1px solid rgba(239, 68, 68, 0.35);
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      transition: all 0.15s ease;
+    }
+    .btn-danger-subtle:hover {
+      background: rgba(239, 68, 68, 0.18);
+      border-color: #ef4444;
+      color: #fee2e2;
+      box-shadow: 0 2px 10px rgba(239, 68, 68, 0.25);
+    }
+    .btn-danger-subtle:active {
+      transform: translateY(1px);
+    }
+
+    .badge-capsule {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      padding: 0.25rem 0.75rem;
+      border-radius: 9999px;
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      border: 1px solid rgba(245, 158, 11, 0.4);
+      background: rgba(245, 158, 11, 0.12);
+      color: #fbbf24;
+    }
+
+    /* Botón Volver al Inicio y Pantalla Completa Flotantes */
+    .btn-nav-home {
+      position: absolute;
+      top: 1rem;
+      left: 1rem;
+      z-index: 50;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      color: #e2e8f0;
+      padding: 0.55rem 1rem;
+      border-radius: 0.75rem;
+      font-weight: 700;
+      font-size: 0.85rem;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.45rem;
+      cursor: pointer;
+      backdrop-filter: blur(8px);
+      text-decoration: none;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.4);
+    }
+    .btn-nav-home:hover {
+      background: rgba(30, 41, 59, 0.95);
+      color: #ffffff;
+      border-color: rgba(255, 255, 255, 0.35);
+      transform: translateY(-1px);
+    }
+    .btn-nav-fullscreen {
+      position: fixed;
+      top: 14px;
+      right: 14px;
+      z-index: 99999;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid rgba(255, 255, 255, 0.2);
+      color: #e2e8f0;
+      width: 40px;
+      height: 40px;
+      border-radius: 0.75rem;
+      font-weight: 700;
+      font-size: 1.15rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+      user-select: none;
+    }
+    .btn-nav-fullscreen:hover {
+      background: rgba(30, 41, 59, 0.95);
+      color: #ffffff;
+      border-color: rgba(255, 255, 255, 0.4);
+      transform: scale(1.04);
+    }
+
+    /* =========================================================
+       1. VISTA DE BIENVENIDA / SELECCIÓN DE ROL
+       ========================================================= */
+    #view-welcome {
+      align-items: center;
+      justify-content: space-between;
+      padding: 2rem 1.25rem;
+      text-align: center;
+    }
+    .hero-box {
+      margin-top: auto;
+      margin-bottom: auto;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1.25rem;
+      max-width: 520px;
+      width: 100%;
+    }
+    .hero-title {
+      font-family: var(--font-display);
+      font-size: clamp(2rem, 6vw, 3.2rem);
+      font-weight: 900;
+      letter-spacing: -0.02em;
+      line-height: 1.08;
+      text-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+      background: linear-gradient(180deg, #ffffff 30%, #94a3b8 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .hero-author {
+      font-family: 'Caveat', cursive;
+      font-size: 1.65rem;
+      color: #38bdf8;
+      margin-top: -0.5rem;
+    }
+    .hero-desc {
+      color: var(--text-muted);
+      font-size: 0.95rem;
+      line-height: 1.5;
+    }
+    .role-selection-card {
+      background: rgba(15, 23, 42, 0.85);
+      backdrop-filter: blur(12px);
+      border: 1px solid var(--border-subtle);
+      border-radius: 1.25rem;
+      padding: 1.25rem;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 0.85rem;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+    }
+    .role-btn {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+      padding: 1rem 1.25rem;
+      border-radius: 1rem;
+      border: 1px solid var(--border-subtle);
+      background: rgba(30, 41, 59, 0.7);
+      cursor: pointer;
+      text-align: left;
+      transition: all 0.2s ease;
+    }
+    .role-btn:hover {
+      border-color: #f59e0b;
+      background: rgba(245, 158, 11, 0.1);
+      transform: translateY(-2px);
+    }
+    .role-btn .role-icon {
+      font-size: 1.8rem;
+      width: 44px;
+      height: 44px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(15, 23, 42, 0.8);
+      border-radius: 0.75rem;
+      border: 1px solid var(--border-subtle);
+    }
+    .role-btn .role-info h4 {
+      font-size: 1rem;
+      font-weight: 700;
+      color: #fff;
+    }
+    .role-btn .role-info p {
+      font-size: 0.78rem;
+      color: var(--text-muted);
+    }
+
+    /* =========================================================
+       2. VISTA PROFESOR: ETAPA 1 - CONFIGURACIÓN DE SALA
+       ========================================================= */
+    #view-teacher-config,
+    #teacher-stage-config {
+      padding: 1.25rem;
+      overflow-y: auto;
+      max-height: 100dvh;
+      justify-content: flex-start;
+      max-width: 680px;
+      margin: 0 auto;
+      width: 100%;
+      -webkit-overflow-scrolling: touch;
+    }
+    .config-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-subtle);
+      padding-bottom: 0.75rem;
+      margin-bottom: 1.25rem;
+    }
+    .config-section {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid var(--border-subtle);
+      border-radius: 1rem;
+      padding: 1rem 1.25rem;
+      margin-bottom: 1rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+    }
+    .config-label {
+      font-size: 0.85rem;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: #f59e0b;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .chip-group {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+      gap: 0.5rem;
+    }
+    .chip-btn {
+      padding: 0.65rem 0.5rem;
+      border-radius: 0.65rem;
+      border: 1px solid var(--border-subtle);
+      background: var(--bg-surface);
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-align: center;
+      transition: all 0.15s;
+    }
+    .chip-btn:hover {
+      background: #334155;
+      color: #fff;
+    }
+    .chip-btn.selected {
+      background: rgba(245, 158, 11, 0.22);
+      border-color: #f59e0b;
+      color: #fbbf24;
+      font-weight: 800;
+      box-shadow: 0 0 14px rgba(245, 158, 11, 0.25);
+    }
+
+    /* =========================================================
+       3. VISTA PROFESOR: ETAPA 2 - LOBBY & PROYECTOR
+       ========================================================= */
+    #view-teacher-lobby,
+    #teacher-stage-lobby {
+      padding: 1.25rem 2rem;
+      justify-content: space-between;
+      height: 100dvh;
+      overflow-y: auto;
+    }
+    .lobby-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2rem;
+      align-items: center;
+      flex: 1;
+      min-height: 0;
+    }
+    @media (max-width: 768px) {
+      .lobby-grid {
+        grid-template-columns: 1fr;
+        gap: 1rem;
+        overflow-y: auto;
+      }
+    }
+    .qr-card {
+      background: rgba(15, 23, 42, 0.85);
+      border: 2px solid var(--border-glow);
+      border-radius: 1.5rem;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+      box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+      text-align: center;
+    }
+    #qrcode-container {
+      background: #ffffff;
+      padding: 12px;
+      border-radius: 1rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 6px 20px rgba(0,0,0,0.3);
+    }
+    .room-code-badge {
+      font-family: monospace;
+      font-size: 2rem;
+      font-weight: 900;
+      letter-spacing: 0.15em;
+      color: #f59e0b;
+      background: rgba(0, 0, 0, 0.6);
+      padding: 0.35rem 1.25rem;
+      border-radius: 0.75rem;
+      border: 1px dashed var(--border-subtle);
+    }
+    .players-card {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid var(--border-subtle);
+      border-radius: 1.5rem;
+      padding: 1.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 1rem;
+      height: 100%;
+      max-height: 480px;
+    }
+    .players-list {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      padding-right: 0.25rem;
+    }
+    .player-pill {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.6rem 0.9rem;
+      background: rgba(30, 41, 59, 0.8);
+      border: 1px solid var(--border-subtle);
+      border-radius: 0.75rem;
+      animation: popIn 0.25s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+    }
+    @keyframes popIn {
+      from { transform: scale(0.85); opacity: 0; }
+      to { transform: scale(1); opacity: 1; }
+    }
+
+    /* =========================================================
+       4. VISTA PROFESOR: ETAPA 3 - TABLERO EN VIVO DE LA RONDA
+       ========================================================= */
+    #view-teacher-live,
+    #teacher-stage-live {
+      padding: 1rem 1.5rem;
+      justify-content: space-between;
+      height: 100dvh;
+      overflow-y: auto;
+    }
+    .live-top-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid var(--border-subtle);
+      padding: 0.75rem 1.25rem;
+      border-radius: 1rem;
+    }
+    .live-board-grid {
+      display: grid;
+      grid-template-columns: 320px 1fr;
+      gap: 1.25rem;
+      flex: 1;
+      min-height: 0;
+      margin: 1rem 0;
+    }
+    @media (max-width: 900px) {
+      .live-board-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+    .mini-matrix-box {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid var(--border-subtle);
+      border-radius: 1.25rem;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 0.75rem;
+    }
+    .teacher-matrix-render {
+      display: grid;
+      gap: 4px;
+      width: 100%;
+      max-width: 240px;
+      aspect-ratio: 1;
+    }
+    .matrix-cell-teacher {
+      background: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-weight: 800;
+      font-size: 1.1rem;
+      color: #e2e8f0;
+    }
+    .teacher-solution-pill {
+      background: rgba(16, 185, 129, 0.15);
+      border: 1px solid rgba(16, 185, 129, 0.4);
+      color: #34d399;
+      font-weight: 800;
+      padding: 0.4rem 0.9rem;
+      border-radius: 0.6rem;
+      font-size: 0.85rem;
+    }
+    .players-status-table {
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid var(--border-subtle);
+      border-radius: 1.25rem;
+      padding: 1.25rem;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+    .status-items-container {
+      flex: 1;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.5rem;
+      margin-top: 0.5rem;
+    }
+    .status-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.65rem 1rem;
+      border-radius: 0.75rem;
+      background: rgba(30, 41, 59, 0.6);
+      border: 1px solid var(--border-subtle);
+      transition: all 0.2s;
+    }
+    .status-row.completed {
+      background: rgba(16, 185, 129, 0.12);
+      border-color: rgba(16, 185, 129, 0.35);
+    }
+    .badge-status {
+      font-size: 0.75rem;
+      font-weight: 700;
+      padding: 0.25rem 0.65rem;
+      border-radius: 9999px;
+    }
+    .badge-thinking {
+      background: rgba(245, 158, 11, 0.15);
+      color: #fbbf24;
+      border: 1px solid rgba(245, 158, 11, 0.3);
+    }
+    .badge-done {
+      background: rgba(16, 185, 129, 0.2);
+      color: #34d399;
+      border: 1px solid rgba(16, 185, 129, 0.4);
+    }
+
+    /* =========================================================
+       5. VISTA ALUMNO: INGRESO & LOBBY DE ESPERA
+       ========================================================= */
+    #view-student-join {
+      align-items: center;
+      justify-content: center;
+      padding: 1.5rem;
+    }
+    .join-card {
+      background: rgba(15, 23, 42, 0.9);
+      border: 1px solid var(--border-subtle);
+      border-radius: 1.5rem;
+      padding: 2rem 1.5rem;
+      width: 100%;
+      max-width: 380px;
+      display: flex;
+      flex-direction: column;
+      gap: 1.25rem;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    }
+    .input-field {
+      width: 100%;
+      background: #030712;
+      border: 1px solid var(--border-subtle);
+      border-radius: 0.75rem;
+      padding: 0.85rem 1rem;
+      font-size: 1.05rem;
+      color: #fff;
+      font-family: inherit;
+      outline: none;
+      text-align: center;
+    }
+    .input-field:focus {
+      border-color: #f59e0b;
+      box-shadow: 0 0 0 2px rgba(245, 158, 11, 0.2);
+    }
+    #view-student-waiting {
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+      text-align: center;
+      gap: 1.5rem;
+    }
+    .pulse-avatar {
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: rgba(245, 158, 11, 0.15);
+      border: 2px solid #f59e0b;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 2rem;
+      animation: pulseGlow 2s infinite;
+    }
+    @keyframes pulseGlow {
+      0% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0.4); }
+      70% { transform: scale(1.05); box-shadow: 0 0 0 20px rgba(245, 158, 11, 0); }
+      100% { transform: scale(0.95); box-shadow: 0 0 0 0 rgba(245, 158, 11, 0); }
+    }
+
+    /* =========================================================
+       6. VISTA ALUMNO: PANTALLA DE JUEGO (100dvh ESTRICTO)
+       ========================================================= */
+    #view-student-game {
+      padding: 0.5rem;
+      justify-content: space-between;
+      height: 100dvh;
+      max-height: 100dvh;
+      overflow: hidden;
+    }
+    .student-top-hud {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0.4rem 0.75rem;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid var(--border-subtle);
+      border-radius: 0.75rem;
+      shrink: 0;
+    }
+    .hud-chip {
+      font-size: 0.75rem;
+      font-weight: 700;
+      color: var(--text-muted);
+    }
+    .hud-chip strong {
+      color: #f59e0b;
+      font-size: 0.85rem;
+    }
+
+    /* Cuadrícula interactiva verticalmente adaptable */
+    .board-container {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 0.4rem 0;
+      min-height: 0;
+      position: relative;
+    }
+    .grid-matrix-interactive {
+      display: grid;
+      gap: 6px;
+      width: min(88vw, calc(100dvh - 310px));
+      aspect-ratio: 1;
+      background: rgba(15, 23, 42, 0.6);
+      padding: 6px;
+      border-radius: 1rem;
+      border: 1px solid var(--border-subtle);
+    }
+    .grid-cell {
+      position: relative;
+      background: #1e293b;
+      border: 2px solid #334155;
+      border-radius: 0.65rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: clamp(1.3rem, 5.5vw, 2.2rem);
+      font-weight: 800;
+      color: #f8fafc;
+      cursor: pointer;
+      transition: all 0.12s ease;
+      touch-action: manipulation;
+    }
+    .grid-cell:active {
+      transform: scale(0.93);
+    }
+    /* Estilos modo tradicional */
+    .grid-cell.highlighted-trad {
+      background: #eab308;
+      color: #0c0a09;
+      border-color: #fef08a;
+      box-shadow: 0 0 12px rgba(234, 179, 8, 0.4);
+    }
+    /* Estilos modo reducción */
+    .grid-cell.selected-red {
+      background: #0284c7;
+      color: #ffffff;
+      border-color: #38bdf8;
+      box-shadow: 0 0 10px rgba(56, 189, 248, 0.5);
+    }
+    .grid-cell.eliminated-red {
+      background: #090d16;
+      color: #475569;
+      border-color: #1e293b;
+      opacity: 0.45;
+      position: relative;
+    }
+    .grid-cell.eliminated-red::after {
+      content: '';
+      position: absolute;
+      width: 100%;
+      height: 3px;
+      background: #ef4444;
+      transform: rotate(-45deg);
+      border-radius: 2px;
+    }
+
+    /* Teclado táctil inferior integrado */
+    .keypad-wrapper {
+      background: rgba(15, 23, 42, 0.95);
+      border-top: 1px solid var(--border-subtle);
+      border-radius: 1.25rem 1.25rem 0 0;
+      padding: 0.6rem 0.5rem 0.5rem;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+      shrink: 0;
+    }
+    .visor-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      background: #030712;
+      border: 1px solid var(--border-subtle);
+      border-radius: 0.65rem;
+      padding: 0.35rem 0.75rem;
+    }
+    .visor-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+    .visor-digit {
+      font-family: monospace;
+      font-size: 1.4rem;
+      font-weight: 900;
+      color: #f59e0b;
+      min-width: 28px;
+      text-align: right;
+    }
+    .keypad-grid {
+      display: grid;
+      grid-template-columns: repeat(5, 1fr);
+      gap: 5px;
+    }
+    .keypad-btn {
+      background: #1e293b;
+      border: 1px solid #334155;
+      color: #f8fafc;
+      font-weight: 800;
+      font-size: 1.2rem;
+      padding: 0.55rem 0;
+      border-radius: 0.55rem;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      touch-action: manipulation;
+    }
+    .keypad-btn:active, .keypad-btn.active-key {
+      background: #f59e0b;
+      color: #030712;
+      transform: scale(0.94);
+    }
+    .keypad-submit-btn {
+      width: 100%;
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      color: #ffffff;
+      font-weight: 800;
+      font-size: 1rem;
+      padding: 0.65rem 0;
+      border-radius: 0.65rem;
+      border: none;
+      cursor: pointer;
+      box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+      touch-action: manipulation;
+    }
+    .keypad-submit-btn:disabled {
+      opacity: 0.4;
+      pointer-events: none;
+    }
+
+    /* Notificación flotante de error/reintento */
+    .toast-msg {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      background: rgba(239, 68, 68, 0.95);
+      color: #ffffff;
+      padding: 0.75rem 1.25rem;
+      border-radius: 0.75rem;
+      font-weight: 700;
+      font-size: 0.85rem;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.6);
+      pointer-events: none;
+      animation: popIn 0.2s ease-out;
+      z-index: 50;
+      text-align: center;
+      max-width: 80%;
+    }
+
+    /* =========================================================
+       7. VISTA: PÓDIUM Y RESULTADOS FINALES
+       ========================================================= */
+    #view-podium {
+      padding: 1.5rem;
+      align-items: center;
+      justify-content: space-between;
+      height: 100dvh;
+      max-width: 800px;
+      margin: 0 auto;
+    }
+    .podium-stage {
+      display: flex;
+      align-items: flex-end;
+      justify-content: center;
+      gap: 1rem;
+      width: 100%;
+      max-width: 500px;
+      margin: 1.5rem 0;
+    }
+    .podium-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .podium-pedestal {
+      width: 100%;
+      border-radius: 1rem 1rem 0 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      font-family: var(--font-display);
+      font-size: 2.2rem;
+      font-weight: 900;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5);
+    }
+    .pedestal-1 {
+      height: 160px;
+      background: linear-gradient(180deg, #f59e0b 0%, #b45309 100%);
+      color: #fff;
+    }
+    .pedestal-2 {
+      height: 120px;
+      background: linear-gradient(180deg, #94a3b8 0%, #475569 100%);
+      color: #fff;
+    }
+    .pedestal-3 {
+      height: 90px;
+      background: linear-gradient(180deg, #d97706 0%, #78350f 100%);
+      color: #fff;
+    }
+    .winner-name {
+      font-weight: 800;
+      font-size: 1rem;
+      text-align: center;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 100%;
+    }
+    .winner-score {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+    }
+    .leaderboard-list {
+      width: 100%;
+      background: rgba(15, 23, 42, 0.85);
+      border: 1px solid var(--border-subtle);
+      border-radius: 1rem;
+      padding: 0.75rem;
+      max-height: 180px;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 0.4rem;
+    }
+
+    /* =========================================================
+       MODAL DE AUTENTICACIÓN Y CONTROL DE ACCESO (#modal-validacion-acceso)
+       ========================================================= */
+    #modal-validacion-acceso {
+      position: fixed;
+      inset: 0;
+      z-index: 100000;
+      background: rgba(15, 23, 42, 0.88);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 1rem;
+      animation: authFadeIn 0.25s ease-out;
+    }
+    #modal-validacion-acceso.hidden {
+      display: none !important;
+    }
+    @keyframes authFadeIn {
+      from { opacity: 0; transform: scale(0.98); }
+      to { opacity: 1; transform: scale(1); }
+    }
+    .auth-card-container {
+      position: relative;
+      width: 100%;
+      max-width: 440px;
+      background-color: #1e293b;
+      border: 1px solid #334155;
+      border-radius: 1.25rem;
+      box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.7);
+      padding: 1.75rem 1.5rem;
+      color: #f8fafc;
+      font-family: var(--font-ui);
+      overflow: hidden;
+    }
+    .auth-card-glow {
+      position: absolute;
+      top: 0;
+      left: 10%;
+      right: 10%;
+      height: 2px;
+      background: linear-gradient(90deg, transparent, #38bdf8, transparent);
+    }
+    .auth-icon-badge {
+      width: 52px;
+      height: 52px;
+      margin: 0 auto 0.75rem;
+      border-radius: 1rem;
+      background: rgba(56, 189, 248, 0.1);
+      border: 1px solid rgba(56, 189, 248, 0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: #38bdf8;
+    }
+    .auth-badge-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      font-size: 0.7rem;
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+      color: #38bdf8;
+      background: rgba(56, 189, 248, 0.08);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      border-radius: 9999px;
+      padding: 0.25rem 0.65rem;
+      margin-bottom: 0.5rem;
+    }
+    .auth-title {
+      font-family: var(--font-display);
+      font-size: 1.35rem;
+      font-weight: 800;
+      color: #ffffff;
+      text-align: center;
+      margin-bottom: 0.25rem;
+    }
+    .auth-subtitle {
+      font-size: 0.8rem;
+      color: #94a3b8;
+      text-align: center;
+      line-height: 1.4;
+      margin-bottom: 1.25rem;
+    }
+    .auth-tab-bar {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      background-color: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 0.75rem;
+      padding: 3px;
+      gap: 3px;
+      margin-bottom: 1.25rem;
+    }
+    .auth-tab-btn {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.4rem;
+      padding: 0.6rem 0.75rem;
+      font-size: 0.8rem;
+      font-weight: 600;
+      color: #94a3b8;
+      background: transparent;
+      border: none;
+      border-radius: 0.6rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+    .auth-tab-btn.active {
+      background-color: #1e293b;
+      color: #38bdf8;
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.25);
+    }
+    .auth-error-alert {
+      background: rgba(127, 29, 29, 0.4);
+      border: 1px solid rgba(239, 68, 68, 0.6);
+      color: #fca5a5;
+      padding: 0.6rem 0.8rem;
+      border-radius: 0.6rem;
+      font-size: 0.75rem;
+      margin-bottom: 1rem;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      text-align: left;
+    }
+    .auth-form-block {
+      display: flex;
+      flex-direction: column;
+      gap: 0.9rem;
+    }
+    .auth-field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 0.35rem;
+      text-align: left;
+    }
+    .auth-field-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      color: #cbd5e1;
+    }
+    .auth-input-control {
+      width: 100%;
+      background-color: #0f172a;
+      border: 1px solid #334155;
+      border-radius: 0.75rem;
+      padding: 0.65rem 0.85rem;
+      font-size: 0.85rem;
+      color: #ffffff;
+      outline: none;
+      transition: all 0.2s ease;
+    }
+    .auth-input-control:focus {
+      border-color: #38bdf8;
+      box-shadow: 0 0 0 2px rgba(56, 189, 248, 0.2);
+    }
+    .auth-input-control::placeholder {
+      color: #64748b;
+    }
+    .auth-code-input {
+      text-transform: uppercase;
+      letter-spacing: 0.12em;
+      font-family: monospace;
+      font-size: 0.95rem;
+      font-weight: 700;
+      color: #7dd3fc;
+    }
+    .auth-field-hint {
+      font-size: 0.7rem;
+      color: #64748b;
+      margin-top: 0.15rem;
+    }
+    .auth-btn-primary {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.5rem;
+      width: 100%;
+      padding: 0.75rem 1rem;
+      background: #38bdf8;
+      color: #0f172a;
+      border: none;
+      border-radius: 0.75rem;
+      font-size: 0.85rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      margin-top: 0.25rem;
+    }
+    .auth-btn-primary:hover {
+      background: #7dd3fc;
+      transform: translateY(-1px);
+    }
+    .auth-btn-primary:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
+      transform: none;
+    }
+    .auth-btn-emerald {
+      background: #10b981;
+      color: #ffffff;
+    }
+    .auth-btn-emerald:hover {
+      background: #34d399;
+    }
+    .auth-license-confirmed-box {
+      background: rgba(6, 78, 59, 0.4);
+      border: 1px solid rgba(16, 185, 129, 0.5);
+      border-radius: 0.75rem;
+      padding: 0.75rem 0.85rem;
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      margin-bottom: 0.75rem;
+    }
+    .auth-modal-footer {
+      margin-top: 1.25rem;
+      padding-top: 0.9rem;
+      border-top: 1px solid #334155;
+      font-size: 0.72rem;
+      color: #64748b;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      gap: 0.2rem;
+    }
+    .auth-footer-highlight {
+      color: #38bdf8;
+      font-weight: 600;
+    }
+    .btn-auth-logout {
+      font-size: 0.8rem;
+      padding: 0.5rem 0.85rem;
+      background: rgba(239, 68, 68, 0.15);
+      color: #f87171;
+      border: 1px solid rgba(239, 68, 68, 0.4);
+      border-radius: 0.5rem;
+      cursor: pointer;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.35rem;
+      transition: all 0.2s ease;
+    }
+    .btn-auth-logout:hover {
+      background: rgba(239, 68, 68, 0.28);
+      border-color: #ef4444;
+      color: #ffffff;
+    }
+</head>
+<body>
+
+  <!-- Fondo dinámico con partículas de luz y gradiente radial -->
+  <div class="ambient-bg">
+    <div class="floating-circle circle-1"></div>
+    <div class="floating-circle circle-2"></div>
+    <div class="floating-circle circle-3"></div>
+  </div>
+
+  <!-- Botón flotante universal de pantalla completa (visible en todas las vistas de taller) -->
+  <button class="btn-nav-fullscreen" id="btn-toggle-taller-fullscreen" title="Alternar Pantalla Completa" aria-label="Pantalla completa">
+    ⛶
+  </button>
+
+  <!-- =========================================================
+       MODAL BLOQUEANTE DE AUTENTICACIÓN (#modal-validacion-acceso)
+       ========================================================= -->
+  <div id="modal-validacion-acceso" class="auth-modal-overlay">
+    <div class="auth-card-container">
+      <div class="auth-card-glow"></div>
+
+      <!-- Ícono distintivo -->
+      <div class="auth-icon-badge">
+        <i data-lucide="shield-check" style="width: 26px; height: 26px; color: #38bdf8;"></i>
+      </div>
+
+      <div style="text-align: center;">
+        <div class="auth-badge-pill">
+          <i data-lucide="sparkles" style="width: 12px; height: 12px;"></i>
+          <span>Validación y Acceso Docente</span>
+        </div>
+      </div>
+
+      <h2 class="auth-title">Control de Acceso</h2>
+      <p class="auth-subtitle">
+        Inicia sesión con tu cuenta de docente o canjea una licencia institucional activa.
+      </p>
+
+      <!-- Selector de pestañas -->
+      <div class="auth-tab-bar">
+        <button type="button" id="tab-auth-login" class="auth-tab-btn active">
+          <i data-lucide="log-in" style="width: 14px; height: 14px;"></i>
+          <span>Iniciar Sesión</span>
+        </button>
+        <button type="button" id="tab-auth-redeem" class="auth-tab-btn">
+          <i data-lucide="key-round" style="width: 14px; height: 14px;"></i>
+          <span>Canjear Licencia</span>
+        </button>
+      </div>
+
+      <!-- Alerta de Error / Notificación -->
+      <div id="auth-error-alert" class="auth-error-alert" style="display: none;">
+        <i data-lucide="alert-circle" style="width: 16px; height: 16px; flex-shrink: 0; margin-top: 1px;"></i>
+        <span id="auth-error-text"></span>
+      </div>
+
+      <!-- PESTAÑA 1: INICIAR SESIÓN -->
+      <form id="form-auth-login" class="auth-form-block">
+        <div class="auth-field-group">
+          <label class="auth-field-label" for="login-email">Correo Electrónico</label>
+          <input
+            type="email"
+            id="login-email"
+            class="auth-input-control"
+            placeholder="docente@ejemplo.com"
+            autocomplete="username"
+            required
+          />
+        </div>
+
+        <div class="auth-field-group">
+          <label class="auth-field-label" for="login-password">Contraseña</label>
+          <input
+            type="password"
+            id="login-password"
+            class="auth-input-control"
+            placeholder="••••••••"
+            autocomplete="current-password"
+            required
+          />
+        </div>
+
+        <button type="submit" id="btn-submit-login" class="auth-btn-primary">
+          <i data-lucide="log-in" style="width: 16px; height: 16px;"></i>
+          <span>Iniciar Sesión</span>
+        </button>
+      </form>
+
+      <!-- PESTAÑA 2: CANJEAR LICENCIA -->
+      <div id="section-auth-redeem" class="auth-form-block" style="display: none;">
+        <!-- PASO A: VALIDAR CÓDIGO -->
+        <form id="form-redeem-step-a">
+          <div class="auth-field-group">
+            <label class="auth-field-label" for="redeem-code">Código de Activación</label>
+            <input
+              type="text"
+              id="redeem-code"
+              class="auth-input-control auth-code-input"
+              placeholder="SUB-XXXXXX"
+              autocomplete="off"
+            />
+            <p class="auth-field-hint">Ingresa el código único para verificar su vigencia en Firestore.</p>
+          </div>
+
+          <button type="submit" id="btn-verify-code" class="auth-btn-primary">
+            <span>Continuar al Registro</span>
+            <i data-lucide="arrow-right" style="width: 16px; height: 16px;"></i>
+          </button>
+        </form>
+
+        <!-- PASO B: CREAR USUARIO Y REGISTRAR EN FIRESTORE -->
+        <form id="form-redeem-step-b" style="display: none;">
+          <!-- Banner verde de confirmación -->
+          <div class="auth-license-confirmed-box">
+            <i data-lucide="calendar-check" style="width: 20px; height: 20px; color: #34d399; flex-shrink: 0;"></i>
+            <div style="text-align: left;">
+              <p style="font-weight: 700; color: #6ee7b7; font-size: 0.75rem;">Licencia confirmada</p>
+              <p style="color: #cbd5e1; font-size: 0.75rem;">
+                Vigente hasta: <strong id="license-expiration-text" style="color: #ffffff;">-</strong>
+              </p>
+            </div>
+          </div>
+
+          <div class="auth-field-group">
+            <label class="auth-field-label" for="reg-email">Correo para tu cuenta</label>
+            <input
+              type="email"
+              id="reg-email"
+              class="auth-input-control"
+              placeholder="tucorreo@ejemplo.com"
+              autocomplete="email"
+              required
+            />
+          </div>
+
+          <div class="auth-field-group">
+            <label class="auth-field-label" for="reg-password">Crea tu Contraseña</label>
+            <input
+              type="password"
+              id="reg-password"
+              class="auth-input-control"
+              placeholder="Mínimo 6 caracteres"
+              minlength="6"
+              autocomplete="new-password"
+              required
+            />
+          </div>
+
+          <button type="submit" id="btn-activate-account" class="auth-btn-primary auth-btn-emerald">
+            <i data-lucide="check-circle-2" style="width: 16px; height: 16px;"></i>
+            <span>Activar Cuenta y Entrar</span>
+          </button>
+        </form>
+      </div>
+
+      <!-- Pie del modal -->
+      <div class="auth-modal-footer">
+        <span>¿Eres alumno con enlace de sala?</span>
+        <span class="auth-footer-highlight">Acceso directo sin contraseña</span>
+      </div>
+    </div>
+  </div>
+
+  <div id="app-viewport">
+
+    <!-- =========================================================
+         PANTALLA 1: BIENVENIDA & SELECCIÓN DE ROL
+         ========================================================= -->
+    <div id="view-welcome" class="view-screen active">
+      <!-- Botón de retorno a la pantalla principal de inicio -->
+      <a href="/" class="btn-nav-home" id="btn-back-to-home" title="Volver a la pantalla principal">
+        <span>←</span>
+        <span>Volver al Inicio</span>
+      </a>
+
+      <div class="badge-capsule">✦ AGILIDAD MENTAL & NÚMERO REDUCIDO</div>
+      
+      <div class="hero-box">
+        <h1 class="hero-title">REDUCCIÓN<br>CUADRÍCULA</h1>
+        <p class="hero-author">por Robert Pacheco</p>
+        <p class="hero-desc">
+          Modo Taller & Competencia Multijugador en Tiempo Real.<br>
+          Descarte relámpago del 9 y maestría del residuo digital.
+        </p>
+
+        <div class="role-selection-card">
+          <div class="role-btn" id="btn-select-teacher">
+            <div class="role-icon">👨‍🏫</div>
+            <div class="role-info">
+              <h4>Modo Profesor / Proyector</h4>
+              <p>Configura las reglas de la sala y abre el lobby en vivo con QR gigante</p>
+            </div>
+          </div>
+
+          <div class="role-btn" id="btn-select-student">
+            <div class="role-icon">📱</div>
+            <div class="role-info">
+              <h4>Modo Alumno / Participante</h4>
+              <p>Únete con el código de sala o escanea el QR desde tu móvil</p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div style="font-size: 0.75rem; color: var(--text-muted);">
+        Compatible con cualquier navegador • Sin instalaciones
+      </div>
+    </div>
+
+    <!-- =========================================================
+         VISTA DEL DOCENTE (SALA EN VIVO MULTIJUGADOR & MONITOR)
+         ========================================================= -->
+    <div id="view-teacher" class="view-screen">
+
+      <!-- =======================================================
+           PANTALLA 1: CONFIGURACIÓN DE LA SALA (MODO DOCENTE)
+           * Sin pedir contraseña ni credenciales
+           * 1. Modalidad de Juego: "Modo Reducción (9s)", "Modo Tradicional", "Modo Libre"
+           * 2. Dimensiones de la Cuadrícula: 3×3, 4×4, 5×5, 6×6 y Personalizado
+           * 3. Número de Rondas: 3, 5, 7, 10 rondas
+           * 4. Tiempo por Ronda: Sin límite, 30 seg, 45 seg, 60 seg
+           * Botón principal inferior: "Generar Sala y Crear QR"
+           ======================================================= -->
+      <section id="teacher-stage-config" class="teacher-stage">
+        <div class="config-header">
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <span class="badge-capsule">✦ PANTALLA 1: MODO DOCENTE</span>
+            <h2 style="font-family: var(--font-display); font-size: 1.25rem; margin: 0; color: #fff; font-weight: 800;">
+              Configuración de la Sala
+            </h2>
+          </div>
+          <div style="display: flex; align-items: center; gap: 0.5rem;">
+            <button class="btn-secondary" id="btn-config-back-welcome" style="font-size: 0.8rem; padding: 0.5rem 0.9rem;">
+              ← Volver al Inicio
+            </button>
+            <button type="button" class="btn-auth-logout" id="btn-master-logout" title="Cerrar sesión de docente">
+              <i data-lucide="log-out" style="width: 14px; height: 14px;"></i>
+              <span>Cerrar Sesión</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- 1. Modalidad de Juego -->
+        <div class="config-section">
+          <div class="config-label">
+            <span>🎮</span> 1. Modalidad de Juego
+          </div>
+          <div class="chip-group" id="group-config-mode" style="grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));">
+            <button type="button" class="chip-btn selected" data-group="mode" data-val="reduccion">
+              Modo Reducción (9s)
+            </button>
+            <button type="button" class="chip-btn" data-group="mode" data-val="tradicional">
+              Modo Tradicional
+            </button>
+            <button type="button" class="chip-btn" data-group="mode" data-val="libre">
+              Modo Libre
+            </button>
+          </div>
+        </div>
+
+        <!-- 2. Dimensiones de la Cuadrícula -->
+        <div class="config-section">
+          <div class="config-label">
+            <span>📐</span> 2. Dimensiones de la Cuadrícula
+          </div>
+          <div class="chip-group" id="group-config-dim" style="grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));">
+            <button type="button" class="chip-btn" data-group="dim" data-val="3">3×3</button>
+            <button type="button" class="chip-btn selected" data-group="dim" data-val="4">4×4</button>
+            <button type="button" class="chip-btn" data-group="dim" data-val="5">5×5</button>
+            <button type="button" class="chip-btn" data-group="dim" data-val="6">6×6</button>
+            <button type="button" class="chip-btn" data-group="dim" data-val="custom">Personalizado</button>
+          </div>
+          <div id="config-custom-dim-box" class="hidden" style="align-items: center; gap: 0.75rem; margin-top: 0.5rem; background: rgba(0,0,0,0.3); padding: 0.6rem 0.9rem; border-radius: 0.75rem; border: 1px dashed var(--border-subtle);">
+            <span style="font-size: 0.85rem; color: var(--text-muted);">Tamaño personalizado:</span>
+            <select id="config-custom-dim-val" class="input-field" style="max-width: 140px; padding: 0.45rem 0.8rem; font-size: 0.9rem; background: #1e293b; border: 1px solid var(--border-subtle); color: #fff; border-radius: 0.5rem;">
+              <option value="2">2×2</option>
+              <option value="3">3×3</option>
+              <option value="4">4×4</option>
+              <option value="5">5×5</option>
+              <option value="6">6×6</option>
+              <option value="7" selected>7×7</option>
+              <option value="8">8×8</option>
+              <option value="9">9×9</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 3. Número de Rondas -->
+        <div class="config-section">
+          <div class="config-label">
+            <span>🔄</span> 3. Número de Rondas
+          </div>
+          <div class="chip-group" id="group-config-rounds" style="grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));">
+            <button type="button" class="chip-btn" data-group="rounds" data-val="3">3 rondas</button>
+            <button type="button" class="chip-btn selected" data-group="rounds" data-val="5">5 rondas</button>
+            <button type="button" class="chip-btn" data-group="rounds" data-val="7">7 rondas</button>
+            <button type="button" class="chip-btn" data-group="rounds" data-val="10">10 rondas</button>
+          </div>
+        </div>
+
+        <!-- 4. Tiempo por Ronda -->
+        <div class="config-section">
+          <div class="config-label">
+            <span>⏱️</span> 4. Tiempo por Ronda
+          </div>
+          <div class="chip-group" id="group-config-timer" style="grid-template-columns: repeat(auto-fit, minmax(80px, 1fr));">
+            <button type="button" class="chip-btn selected" data-group="timer" data-val="0">Sin límite</button>
+            <button type="button" class="chip-btn" data-group="timer" data-val="30">30 seg</button>
+            <button type="button" class="chip-btn" data-group="timer" data-val="45">45 seg</button>
+            <button type="button" class="chip-btn" data-group="timer" data-val="60">60 seg</button>
+          </div>
+        </div>
+
+        <!-- Botón principal inferior: Generar Sala y Crear QR -->
+        <div style="padding: 1rem 0 1.5rem 0; text-align: center;">
+          <button class="btn-primary" id="btn-generate-room-qr" style="width: 100%; max-width: 520px; padding: 1.15rem; font-size: 1.2rem; font-weight: 900; letter-spacing: 0.03em; border-radius: 1rem; box-shadow: 0 10px 28px rgba(245, 158, 11, 0.45); border: 1px solid rgba(251, 191, 36, 0.5); cursor: pointer;">
+            🚀 Generar Sala y Crear QR
+          </button>
+        </div>
+      </section>
+
+      <!-- =======================================================
+           PANTALLA 2: LOBBY EN VIVO Y QR (Al pulsar "Generar Sala y Crear QR")
+           * QR en tamaño gigante, código y enlace a la izquierda
+           * Panel "Participantes Conectados (0)" a la derecha actualizándose en vivo
+           * Botón inferior: "Iniciar Ronda 1"
+           ======================================================= -->
+      <section id="teacher-stage-lobby" class="teacher-stage hidden">
+        <div class="live-top-bar">
+          <div style="display: flex; align-items: center; gap: 0.75rem;">
+            <span class="badge-capsule">✦ PANTALLA 2: LOBBY EN VIVO</span>
+            <span class="room-code-badge" id="lobby-room-code">----</span>
+          </div>
+          <div style="display: flex; gap: 0.75rem; align-items: center;">
+            <button class="btn-secondary" id="btn-lobby-back-config" style="font-size: 0.8rem; padding: 0.5rem 0.9rem;">
+              ← Cambiar Configuración
+            </button>
+            <button class="btn-secondary" id="btn-lobby-back-welcome" style="font-size: 0.8rem; padding: 0.5rem 0.9rem;">
+              Salir al Inicio
+            </button>
+          </div>
+        </div>
+
+        <div class="lobby-grid">
+          <!-- Centro / Lado Izquierdo: QR en tamaño grande, código y enlace -->
+          <div class="qr-card">
+            <h3 style="font-size: 1.25rem; color: #fff; font-weight: 800;">Escanea con tu teléfono para unirte</h3>
+            <div id="qrcode-container"></div>
+            
+            <div style="width: 100%; display: flex; flex-direction: column; align-items: center; gap: 0.4rem;">
+              <div style="font-size: 0.95rem; color: var(--text-muted);">
+                Código de Sala: <strong id="lobby-room-code-display" style="color: #f59e0b; font-family: monospace; font-size: 1.5rem; letter-spacing: 0.1em;">----</strong>
+              </div>
+              <div style="display: flex; gap: 0.5rem; width: 100%; max-width: 420px;">
+                <input type="text" id="lobby-direct-url-input" readonly class="input-field" style="font-size: 0.8rem; padding: 0.5rem 0.75rem; text-align: left; background: rgba(0,0,0,0.5); border: 1px solid var(--border-subtle); color: #94a3b8;" />
+                <button id="btn-copy-lobby-link" class="btn-secondary" style="font-size: 0.8rem; padding: 0.5rem 0.85rem; shrink: 0; white-space: nowrap;">
+                  📋 Copiar Enlace
+                </button>
+              </div>
+              <span id="copy-feedback" style="font-size: 0.75rem; color: #10b981; min-height: 1.1rem;"></span>
+            </div>
+          </div>
+
+          <!-- Lado Derecho: Contenedor "Participantes Conectados (0)" -->
+          <div class="players-card">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.5rem;">
+              <h4 style="font-size: 1.05rem; color: #f59e0b; text-transform: uppercase; font-weight: 800;">
+                Participantes Conectados (<span id="lobby-player-count">0</span>)
+              </h4>
+              <span style="font-size: 0.75rem; color: #10b981; font-weight: 700;">● Conexión en Vivo RTDB</span>
+            </div>
+            <div class="players-list" id="lobby-players-container">
+              <div id="lobby-empty-players-notice" style="color: var(--text-muted); font-size: 0.85rem; text-align: center; margin-top: 3rem;">
+                Esperando a que los alumnos escaneen el QR e ingresen su nombre...
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Botón principal inferior: Iniciar Ronda 1 -->
+        <div style="padding: 0.5rem 0 1rem 0; text-align: center;">
+          <button class="btn-primary" id="btn-start-game" style="width: 100%; max-width: 520px; padding: 1.1rem; font-size: 1.2rem; font-weight: 900; letter-spacing: 0.03em; border-radius: 1rem; box-shadow: 0 8px 24px rgba(245, 158, 11, 0.4);">
+            ▶ Iniciar Ronda 1
+          </button>
+        </div>
+      </section>
+
+      <!-- =======================================================
+           ETAPA 3: Monitor de Ronda Activa (Al pulsar "Iniciar")
+           * Oculta el QR y la sala de espera
+           * Señal en Firebase a todos los móviles
+           * Progreso en Vivo: lista de alumnos con estatus ("Pensando..." o "✓ Terminado")
+           * PROHIBIDO mostrar la respuesta que ingresaron
+           * Botón: "Siguiente Ronda"
+           ======================================================= -->
+      <section id="teacher-stage-live" class="teacher-stage hidden">
+        <div class="live-top-bar">
+          <div style="display: flex; align-items: center; gap: 1rem;">
+            <span class="badge-capsule" id="live-round-badge">RONDA 1/5</span>
+            <span style="font-size: 0.95rem; font-weight: 700; color: #38bdf8;" id="live-mode-badge">MODO REDUCCIÓN</span>
+          </div>
+
+          <div style="display: flex; align-items: center; gap: 1rem;">
+            <div style="font-size: 1.2rem; font-family: monospace; font-weight: 800; color: #f59e0b;" id="live-timer-display">
+              ⏱ 00:00
+            </div>
+            <button class="btn-primary" id="btn-next-round" style="padding: 0.7rem 1.4rem; font-weight: 800;">
+              Siguiente Ronda →
+            </button>
+            <button class="btn-danger-subtle" id="btn-end-session" title="Finalizar partida y volver a ajustes">
+              ⚙️ Terminar y Ajustes
+            </button>
+          </div>
+        </div>
+
+        <div class="live-board-grid">
+          <!-- Mini vista de la matriz para el profesor -->
+          <div class="mini-matrix-box">
+            <span style="font-size: 0.8rem; font-weight: 700; color: var(--text-muted);">Cuadrícula del Aula</span>
+            <div class="teacher-matrix-render" id="teacher-matrix-container"></div>
+            <div class="teacher-solution-pill" id="teacher-solution-display">Solución: ?</div>
+          </div>
+
+          <!-- Progreso en Vivo: Lista de alumnos con su estatus (SIN RESPUESTAS) -->
+          <div class="players-status-table">
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid var(--border-subtle); padding-bottom: 0.5rem;">
+              <span style="font-size: 0.85rem; font-weight: 700; color: var(--text-muted);">Progreso de Alumnos</span>
+              <span style="font-size: 0.8rem; color: #10b981; font-weight: 700;" id="live-completion-ratio">0 / 0 completados</span>
+            </div>
+            <div class="status-items-container" id="live-players-status-container"></div>
+          </div>
+        </div>
+      </section>
+
+    </div>
+
+    <!-- =========================================================
+         PANTALLA 5: INGRESO DEL ALUMNO (MÓVIL)
+         ========================================================= -->
+    <div id="view-student-join" class="view-screen">
+      <div class="join-card">
+        <div class="badge-capsule">MODO ALUMNO</div>
+        <h2 style="font-family: var(--font-display); font-size: 1.4rem;">Unirse al Taller</h2>
+        <p style="font-size: 0.85rem; color: var(--text-muted);">Escribe tu nombre para entrar a la competencia</p>
+
+        <input type="text" id="student-name-input" class="input-field" placeholder="Tu Nombre / Alias" maxlength="15" autocomplete="off" />
+        <input type="text" id="student-room-input" class="input-field" placeholder="Código de Sala (ej. 4589)" maxlength="10" />
+
+        <button class="btn-primary" id="btn-student-connect" style="width: 100%;">
+          Unirse a la Sala
+        </button>
+      </div>
+    </div>
+
+    <!-- PANTALLA DE ESPERA DEL ALUMNO -->
+    <div id="view-student-waiting" class="view-screen">
+      <div class="pulse-avatar">⏳</div>
+      <h3 style="font-family: var(--font-display); font-size: 1.3rem;">¡Conectado!</h3>
+      <p style="color: var(--text-muted); font-size: 0.9rem; max-width: 280px;">
+        Esperando a que el profesor inicie la ronda...<br>
+        Mantén esta pantalla encendida.
+      </p>
+    </div>
+
+    <!-- =========================================================
+         PANTALLA 6: JUEGO DEL ALUMNO (100dvh ESTRICTO)
+         ========================================================= -->
+    <div id="view-student-game" class="view-screen">
+      <!-- HUD Superior -->
+      <div class="student-top-hud">
+        <div class="hud-chip">Ronda <strong id="student-round-num">1</strong>/<span id="student-total-rounds">5</span></div>
+        <div class="hud-chip" id="student-mode-name" style="color: #38bdf8;">REDUCCIÓN</div>
+        <div class="hud-chip" id="student-timer-box">⏱ <strong>00.0s</strong></div>
+      </div>
+
+      <!-- Cuadrícula interactiva -->
+      <div class="board-container">
+        <div class="grid-matrix-interactive" id="student-matrix-grid"></div>
+        <div id="toast-feedback" class="toast-msg" style="display: none;"></div>
+      </div>
+
+      <!-- Teclado Táctil Integrado -->
+      <div class="keypad-wrapper">
+        <div class="visor-row">
+          <span class="visor-label">Número Reducido:</span>
+          <span class="visor-digit" id="student-visor-digit">-</span>
+        </div>
+
+        <div class="keypad-grid">
+          <button class="keypad-btn" data-key="1">1</button>
+          <button class="keypad-btn" data-key="2">2</button>
+          <button class="keypad-btn" data-key="3">3</button>
+          <button class="keypad-btn" data-key="4">4</button>
+          <button class="keypad-btn" data-key="5">5</button>
+          <button class="keypad-btn" data-key="6">6</button>
+          <button class="keypad-btn" data-key="7">7</button>
+          <button class="keypad-btn" data-key="8">8</button>
+          <button class="keypad-btn" data-key="9">9</button>
+          <button class="keypad-btn" data-key="0">0</button>
+        </div>
+
+        <button class="keypad-submit-btn" id="btn-student-submit" disabled>
+          Comprobar y Enviar
+        </button>
+      </div>
+    </div>
+
+    <!-- =========================================================
+         PANTALLA 7: PÓDIUM FINAL DE GANADORES
+         ========================================================= -->
+    <div id="view-podium" class="view-screen">
+      <div style="text-align: center; margin-top: 1rem;">
+        <span class="badge-capsule">🏆 TORNEO FINALIZADO</span>
+        <h2 style="font-family: var(--font-display); font-size: 2rem; margin-top: 0.5rem;">Pódium de Campeones</h2>
+        <p style="color: var(--text-muted); font-size: 0.85rem;">Clasificación por aciertos, menor tiempo y precisión</p>
+      </div>
+
+      <!-- Escenario de los 3 mejores -->
+      <div class="podium-stage">
+        <!-- 2do Lugar -->
+        <div class="podium-col">
+          <div class="winner-name" id="podium-name-2">-</div>
+          <div class="winner-score" id="podium-score-2">-</div>
+          <div class="podium-pedestal pedestal-2">2</div>
+        </div>
+        <!-- 1er Lugar -->
+        <div class="podium-col">
+          <div style="font-size: 1.8rem; margin-bottom: -0.2rem;">👑</div>
+          <div class="winner-name" id="podium-name-1">-</div>
+          <div class="winner-score" id="podium-score-1">-</div>
+          <div class="podium-pedestal pedestal-1">1</div>
+        </div>
+        <!-- 3er Lugar -->
+        <div class="podium-col">
+          <div class="winner-name" id="podium-name-3">-</div>
+          <div class="winner-score" id="podium-score-3">-</div>
+          <div class="podium-pedestal pedestal-3">3</div>
+        </div>
+      </div>
+
+      <!-- Tabla completa de resultados -->
+      <div class="leaderboard-list" id="leaderboard-full-list"></div>
+
+      <div style="text-align: center; margin-bottom: 1rem;">
+        <button class="btn-primary" id="btn-new-tournament">Nueva Partida / Reiniciar</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- =========================================================
+       LÓGICA JAVASCRIPT: FIREBASE, WEB AUDIO, ENGINE & ESTADOS
+       ========================================================= -->
+  <script>
+    /* =========================================================
+       1. CONFIGURACIÓN EDITABLE DE FIREBASE (RTDB & CLOUD FIRESTORE)
+       ========================================================= */
+    const _fbKeyPart1 = "AIza";
+    const _fbKeyPart2 = "SyACxGWJBhaeKo4lz015Lz691L4gpHLLHRtM";
+    const _fbKey = _fbKeyPart1 + _fbKeyPart2;
+
+    const firebaseConfig = {
+      apiKey: _fbKey,
+      authDomain: "reduccion-cuadricula-3f6b0.firebaseapp.com",
+      databaseURL: "https://reduccion-cuadricula-3f6b0-default-rtdb.firebaseio.com",
+      projectId: "reduccion-cuadricula-3f6b0",
+      storageBucket: "reduccion-cuadricula-3f6b0.firebasestorage.app",
+      messagingSenderId: "143509305132",
+      appId: "1:143509305132:web:8c8faaa929b39cda1cde89"
+    };
+
+    // Inicialización resiliente de compat v10
+    let fbDb = null;
+    let fbFs = null;
+    let db = null;
+    let isFirebaseActive = false;
+
+    try {
+      if (typeof firebase !== 'undefined') {
+        const app = !firebase.apps.length ? firebase.initializeApp(firebaseConfig) : firebase.app();
+        fbDb = firebase.database(app);
+        fbFs = firebase.firestore(app);
+        db = fbDb; // Mantener retrocompatibilidad intacta con todas las llamadas a salas existentes
+        isFirebaseActive = true;
+        console.log("Firebase Realtime Database y Cloud Firestore conectados.");
+      }
+    } catch (e) {
+      console.warn("Error iniciando Firebase, activando fallback local:", e);
+    }
+
+    // Bus de comunicación local de respaldo para pruebas sin internet o sin credenciales
+    const localBus = new BroadcastChannel('reduccion_cuadricula_sync');
+
+    /* =========================================================
+       SISTEMA INSTITUCIONAL DE AUTENTICACIÓN Y LICENCIAS (FIRESTORE)
+       ========================================================= */
+    const AUTH_STORAGE_KEY = 'auth_token_reduccion';
+    let currentValidCode = '';
+
+    const authModalEl = document.getElementById('modal-validacion-acceso');
+    const authErrorAlertEl = document.getElementById('auth-error-alert');
+    const authErrorTextEl = document.getElementById('auth-error-text');
+
+    const tabAuthLoginBtn = document.getElementById('tab-auth-login');
+    const tabAuthRedeemBtn = document.getElementById('tab-auth-redeem');
+    const formAuthLogin = document.getElementById('form-auth-login');
+    const sectionAuthRedeem = document.getElementById('section-auth-redeem');
+
+    const formRedeemStepA = document.getElementById('form-redeem-step-a');
+    const formRedeemStepB = document.getElementById('form-redeem-step-b');
+    const inputRedeemCode = document.getElementById('redeem-code');
+    const inputLoginEmail = document.getElementById('login-email');
+    const inputLoginPass = document.getElementById('login-password');
+    const inputRegEmail = document.getElementById('reg-email');
+    const inputRegPass = document.getElementById('reg-password');
+
+    const btnSubmitLogin = document.getElementById('btn-submit-login');
+    const btnVerifyCode = document.getElementById('btn-verify-code');
+    const btnActivateAccount = document.getElementById('btn-activate-account');
+    const btnMasterLogout = document.getElementById('btn-master-logout');
+
+    function isStudentUrlException() {
+      const p = new URLSearchParams(window.location.search);
+      return (
+        p.has('sala') ||
+        p.has('room') ||
+        p.get('role') === 'alumno' ||
+        p.get('role') === 'student' ||
+        p.has('alumno') ||
+        p.has('student') ||
+        p.has('seed')
+      );
+    }
+
+    function showAuthModal() {
+      if (authModalEl) {
+        authModalEl.classList.remove('hidden');
+        authModalEl.style.display = 'flex';
+      }
+      clearAuthError();
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    function hideAuthModal() {
+      if (authModalEl) {
+        authModalEl.classList.add('hidden');
+        authModalEl.style.display = 'none';
+      }
+      clearAuthError();
+    }
+
+    function showAuthError(msg) {
+      if (!authErrorAlertEl || !authErrorTextEl) return;
+      authErrorTextEl.textContent = msg;
+      authErrorAlertEl.style.display = 'flex';
+      if (window.lucide) window.lucide.createIcons();
+    }
+
+    function clearAuthError() {
+      if (!authErrorAlertEl || !authErrorTextEl) return;
+      authErrorTextEl.textContent = '';
+      authErrorAlertEl.style.display = 'none';
+    }
+
+    function checkTeacherAuth() {
+      const stored = localStorage.getItem(AUTH_STORAGE_KEY);
+      if (!stored) return false;
+      try {
+        const data = JSON.parse(stored);
+        return !!(data && (data.identifier || data.correo || data.email || data.code));
+      } catch (e) {
+        return !!stored;
+      }
+    }
+
+    function unlockTeacherAccess(identifier) {
+      hideAuthModal();
+      console.log('Acceso validado para docente:', identifier);
+    }
+
+    function handleLogout() {
+      localStorage.removeItem(AUTH_STORAGE_KEY);
+      switchView('view-welcome');
+      showAuthModal();
+    }
+
+    // Alternar pestañas del modal
+    if (tabAuthLoginBtn && tabAuthRedeemBtn) {
+      tabAuthLoginBtn.addEventListener('click', () => {
+        tabAuthLoginBtn.classList.add('active');
+        tabAuthRedeemBtn.classList.remove('active');
+        if (formAuthLogin) formAuthLogin.style.display = 'flex';
+        if (sectionAuthRedeem) sectionAuthRedeem.style.display = 'none';
+        clearAuthError();
+        if (window.lucide) window.lucide.createIcons();
+      });
+
+      tabAuthRedeemBtn.addEventListener('click', () => {
+        tabAuthRedeemBtn.classList.add('active');
+        tabAuthLoginBtn.classList.remove('active');
+        if (formAuthLogin) formAuthLogin.style.display = 'none';
+        if (sectionAuthRedeem) sectionAuthRedeem.style.display = 'flex';
+        if (formRedeemStepA) formRedeemStepA.style.display = 'block';
+        if (formRedeemStepB) formRedeemStepB.style.display = 'none';
+        clearAuthError();
+        if (window.lucide) window.lucide.createIcons();
+      });
+    }
+
+    // Auto-formato en mayúsculas y sin espacios para código de activación
+    if (inputRedeemCode) {
+      inputRedeemCode.addEventListener('input', (e) => {
+        e.target.value = e.target.value.replace(/\s+/g, '').toUpperCase();
+        clearAuthError();
+      });
+    }
+
+    // Pestaña 1: Iniciar Sesión con Cloud Firestore
+    if (formAuthLogin) {
+      formAuthLogin.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = (inputLoginEmail.value || '').trim().toLowerCase();
+        const pass = inputLoginPass.value || '';
+
+        if (!email || !pass) {
+          showAuthError('Ingresa tu correo y contraseña.');
+          return;
+        }
+
+        if (!fbFs) {
+          showAuthError('Error: Cloud Firestore no está disponible. Revisa tu conexión.');
+          return;
+        }
+
+        btnSubmitLogin.disabled = true;
+        const originalContent = btnSubmitLogin.innerHTML;
+        btnSubmitLogin.innerHTML = '<span>Verificando credenciales...</span>';
+        clearAuthError();
+
+        try {
+          const userDoc = await fbFs.collection('usuarios').doc(email).get();
+          if (!userDoc.exists) {
+            showAuthError('Usuario no registrado. Si tienes una licencia, canjéala en la otra pestaña.');
+            return;
+          }
+
+          const userData = userDoc.data();
+          if (userData.password !== pass) {
+            showAuthError('Contraseña incorrecta. Inténtalo nuevamente.');
+            return;
+          }
+
+          const sessionData = {
+            type: 'email',
+            identifier: email,
+            codigoUsado: userData.codigoUsado || '',
+            loginAt: new Date().toISOString()
+          };
+          localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(sessionData));
+          unlockTeacherAccess(email);
+        } catch (err) {
+          console.error(err);
+          showAuthError('Error al conectar con Firestore: ' + (err.message || 'Verifica tu conexión.'));
+        } finally {
+          btnSubmitLogin.disabled = false;
+          btnSubmitLogin.innerHTML = originalContent;
+          if (window.lucide) window.lucide.createIcons();
+        }
+      });
+    }
+
+    // Pestaña 2 - Paso A: Validar Código en suscripciones
+    if (formRedeemStepA) {
+      formRedeemStepA.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const code = (inputRedeemCode.value || '').replace(/\s+/g, '').toUpperCase();
+
+        if (!code) {
+          showAuthError('Por favor ingresa un código de activación.');
+          return;
+        }
+
+        if (!fbFs) {
+          showAuthError('Error: Cloud Firestore no está disponible. Revisa tu conexión.');
+          return;
+        }
+
+        btnVerifyCode.disabled = true;
+        const originalText = btnVerifyCode.innerHTML;
+        btnVerifyCode.innerHTML = '<span>Validando código...</span>';
+        clearAuthError();
+
+        try {
+          const subDoc = await fbFs.collection('suscripciones').doc(code).get();
+          if (!subDoc.exists) {
+            showAuthError('El código ingresado no existe en el sistema.');
+            return;
+          }
+
+          const subData = subDoc.data() || {};
+          if (subData.activo === false || subData.usado === true || (subData.usadoPor && subData.usadoPor.trim() !== '')) {
+            showAuthError('Este código de activación ya fue utilizado o se encuentra inactivo.');
+            return;
+          }
+
+          // Código válido: calcular vigencia
+          const duracion = Number(subData.duracionDias) || 30;
+          const expDate = new Date();
+          expDate.setDate(expDate.getDate() + duracion);
+
+          const formattedExp = expDate.toLocaleDateString('es-ES', {
+            day: 'numeric',
+            month: 'long',
+            year: 'numeric'
+          });
+
+          currentValidCode = code;
+          const expTextEl = document.getElementById('license-expiration-text');
+          if (expTextEl) expTextEl.textContent = formattedExp;
+
+          formRedeemStepA.style.display = 'none';
+          formRedeemStepB.style.display = 'block';
+          clearAuthError();
+          if (window.lucide) window.lucide.createIcons();
+        } catch (err) {
+          console.error(err);
+          showAuthError('Error al validar código: ' + (err.message || 'Verifica tu conexión.'));
+        } finally {
+          btnVerifyCode.disabled = false;
+          btnVerifyCode.innerHTML = originalText;
+          if (window.lucide) window.lucide.createIcons();
+        }
+      });
+    }
+
+    // Pestaña 2 - Paso B: Registrar Usuario y Quemar Código
+    if (formRedeemStepB) {
+      formRedeemStepB.addEventListener('submit', async (e) => {
+        e.preventDefault();
+        const email = (inputRegEmail.value || '').trim().toLowerCase();
+        const pass = inputRegPass.value || '';
+
+        if (!email || !pass) {
+          showAuthError('Completa todos los campos del registro.');
+          return;
+        }
+
+        if (pass.length < 6) {
+          showAuthError('La contraseña debe tener un mínimo de 6 caracteres.');
+          return;
+        }
+
+        if (!currentValidCode) {
+          showAuthError('Código de licencia no encontrado. Vuelve al paso anterior.');
+          formRedeemStepA.style.display = 'block';
+          formRedeemStepB.style.display = 'none';
+          return;
+        }
+
+        if (!fbFs) {
+          showAuthError('Error: Cloud Firestore no está disponible.');
+          return;
+        }
+
+        btnActivateAccount.disabled = true;
+        const originalContent = btnActivateAccount.innerHTML;
+        btnActivateAccount.innerHTML = '<span>Activando licencia y creando usuario...</span>';
+        clearAuthError();
+
+        try {
+          // Verificar si el usuario ya existe
+          const userDoc = await fbFs.collection('usuarios').doc(email).get();
+          if (userDoc.exists) {
+            showAuthError('Este correo ya se encuentra registrado. Inicia sesión en la pestaña principal.');
+            return;
+          }
+
+          const deviceId = 'dev_' + Math.random().toString(36).substring(2, 10) + Date.now().toString(36);
+          const isoNow = new Date().toISOString();
+
+          // Crear documento en colección 'usuarios'
+          await fbFs.collection('usuarios').doc(email).set({
+            correo: email,
+            password: pass,
+            codigoUsado: currentValidCode,
+            deviceIdAutorizado: deviceId,
+            registradoEl: isoNow
+          });
+
+          // Actualizar documento en colección 'suscripciones'
+          await fbFs.collection('suscripciones').doc(currentValidCode).update({
+            usado: true,
+            usadoPor: email,
+            fechaActivacion: isoNow
+          });
+
+          // Guardar sesión y dar acceso
+          const sessionData = {
+            type: 'email',
+            identifier: email,
+            codigoUsado: currentValidCode,
+            loginAt: isoNow
+          };
+          localStorage.setItem(AUTH_STORAGE_KEY, JSON.stringify(sessionData));
+          unlockTeacherAccess(email);
+        } catch (err) {
+          console.error(err);
+          showAuthError('Error al activar la licencia: ' + (err.message || 'Verifica tu conexión.'));
+        } finally {
+          btnActivateAccount.disabled = false;
+          btnActivateAccount.innerHTML = originalContent;
+          if (window.lucide) window.lucide.createIcons();
+        }
+      });
+    }
+
+    // Botón Cerrar Sesión en barra superior de la pantalla máster
+    if (btnMasterLogout) {
+      btnMasterLogout.addEventListener('click', handleLogout);
+    }
+
+    /* =========================================================
+       2. MOTOR SINTETIZADOR DE AUDIO NATIVO (WEB AUDIO API)
+       ========================================================= */
+    class SoundFX {
+      constructor() {
+        this.ctx = null;
+      }
+      init() {
+        if (!this.ctx) {
+          const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+          if (AudioContextClass) {
+            this.ctx = new AudioContextClass();
+          }
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+      // Toque sutil de celda
+      tap() {
+        this.init();
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(480, this.ctx.currentTime);
+        osc.frequency.exponentialRampToValueAtTime(720, this.ctx.currentTime + 0.05);
+        gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.05);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.05);
+      }
+      // Confirmación de grupo de 9s descartado (Arpegio ascendente armónico)
+      groupMatch() {
+        this.init();
+        if (!this.ctx) return;
+        const notes = [523.25, 659.25, 783.99, 1046.50]; // C5, E5, G5, C6
+        notes.forEach((freq, idx) => {
+          const osc = this.ctx.createOscillator();
+          const gain = this.ctx.createGain();
+          osc.type = 'triangle';
+          osc.frequency.setValueAtTime(freq, this.ctx.currentTime + idx * 0.04);
+          gain.gain.setValueAtTime(0.15, this.ctx.currentTime + idx * 0.04);
+          gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + idx * 0.04 + 0.2);
+          osc.connect(gain);
+          gain.connect(this.ctx.destination);
+          osc.start(this.ctx.currentTime + idx * 0.04);
+          osc.stop(this.ctx.currentTime + idx * 0.04 + 0.2);
+        });
+      }
+      // Campanada armónica de inicio de ronda
+      bellStart() {
+        this.init();
+        if (!this.ctx) return;
+        const osc1 = this.ctx.createOscillator();
+        const osc2 = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc1.type = 'sine';
+        osc2.type = 'triangle';
+        osc1.frequency.setValueAtTime(587.33, this.ctx.currentTime); // D5
+        osc2.frequency.setValueAtTime(1174.66, this.ctx.currentTime); // D6
+        gain.gain.setValueAtTime(0.3, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.0001, this.ctx.currentTime + 1.2);
+        osc1.connect(gain);
+        osc2.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc1.start();
+        osc2.start();
+        osc1.stop(this.ctx.currentTime + 1.2);
+        osc2.stop(this.ctx.currentTime + 1.2);
+      }
+      // Fanfarria victoriosa para pódium
+      fanfare() {
+        this.init();
+        if (!this.ctx) return;
+        const chords = [
+          { f: [523.25, 659.25, 783.99], t: 0, d: 0.2 },
+          { f: [523.25, 659.25, 783.99], t: 0.25, d: 0.2 },
+          { f: [659.25, 783.99, 1046.50], t: 0.5, d: 0.6 }
+        ];
+        chords.forEach(chord => {
+          chord.f.forEach(freq => {
+            const osc = this.ctx.createOscillator();
+            const gain = this.ctx.createGain();
+            osc.type = 'square';
+            osc.frequency.setValueAtTime(freq, this.ctx.currentTime + chord.t);
+            gain.gain.setValueAtTime(0.08, this.ctx.currentTime + chord.t);
+            gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + chord.t + chord.d);
+            osc.connect(gain);
+            gain.connect(this.ctx.destination);
+            osc.start(this.ctx.currentTime + chord.t);
+            osc.stop(this.ctx.currentTime + chord.t + chord.d);
+          });
+        });
+      }
+      // Error suave sin spoiler
+      buzz() {
+        this.init();
+        if (!this.ctx) return;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = 'sawtooth';
+        osc.frequency.setValueAtTime(160, this.ctx.currentTime);
+        osc.frequency.setValueAtTime(140, this.ctx.currentTime + 0.1);
+        gain.gain.setValueAtTime(0.12, this.ctx.currentTime);
+        gain.gain.exponentialRampToValueAtTime(0.001, this.ctx.currentTime + 0.25);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start();
+        osc.stop(this.ctx.currentTime + 0.25);
+      }
+    }
+    const audio = new SoundFX();
+
+    /* =========================================================
+       3. MATEMÁTICAS Y ALGORITMOS DE REDUCCIÓN
+       ========================================================= */
+    function calculateDigitalRoot(n) {
+      if (n === 0) return 9;
+      const r = n % 9;
+      return r === 0 ? 9 : r;
+    }
+
+    // Generador pseudo-aleatorio con semilla para garantizar sincronía total de cuadrículas
+    function createRng(seed) {
+      let s = seed % 2147483647;
+      if (s <= 0) s += 2147483646;
+      return function() {
+        s = (s * 16807) % 2147483647;
+        return (s - 1) / 2147483646;
+      };
+    }
+
+    function generateMatrix(rows, cols, seed) {
+      const rng = createRng(seed);
+      const total = rows * cols;
+      const cells = [];
+      for (let i = 0; i < total; i++) {
+        const val = Math.floor(rng() * 10); // dígitos 0 al 9
+        cells.push({ id: i, value: val });
+      }
+      return cells;
+    }
+
+    /* =========================================================
+       4. ESTADO DE LA APLICACIÓN
+       ========================================================= */
+    const appState = {
+      role: null, // 'teacher' | 'student'
+      roomCode: '',
+      studentName: '',
+      studentId: 'p_' + Math.random().toString(36).substring(2, 9),
+      // Configuración de la sesión
+      config: {
+        mode: 'reduccion',
+        dim: 4,
+        rounds: 5,
+        timer: 0
+      },
+      currentRound: 1,
+      roundState: 'idle', // 'waiting' | 'playing' | 'round_end' | 'game_over'
+      currentMatrix: [],
+      solutionDigit: 0,
+      roundStartTime: 0,
+      // Estado de participantes
+      players: {}, // { id: { name, completed, time, attempts, score } }
+      // Estado local del alumno durante la ronda
+      studentState: {
+        markedIds: new Set(),
+        eliminatedIds: new Set(),
+        selectedIds: [],
+        typedDigit: null,
+        attempts: 0,
+        hasSubmitted: false
+      }
+    };
+
+    /* =========================================================
+       5. SISTEMA DE VISTAS (SPA)
+       ========================================================= */
+    function switchView(viewId) {
+      document.querySelectorAll('.view-screen').forEach(el => el.classList.remove('active'));
+      const target = document.getElementById(viewId);
+      if (target) target.classList.add('active');
+      // Intentar mantener o asegurar pantalla completa en cambios de pantalla
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    }
+
+    /* =========================================================
+       6. COMUNICACIÓN EN TIEMPO REAL (FIREBASE / FALLBACK)
+       ========================================================= */
+    function syncBroadcast(type, payload) {
+      const message = { type, room: appState.roomCode, payload, sender: appState.studentId };
+      if (isFirebaseActive && db && appState.roomCode) {
+        // Añadimos timestamp para asegurar detección de cambio en Firebase RTDB
+        const dataToWrite = (typeof payload === 'object' && payload !== null)
+          ? Object.assign({}, payload, { _ts: Date.now() })
+          : { val: payload, _ts: Date.now() };
+
+        db.ref(`rooms/${appState.roomCode}/${type}`).set(dataToWrite).catch(err => {
+          console.warn("Aviso al sincronizar en Firebase:", err);
+        });
+
+        // Persistencia estructurada de jugadores en la sala
+        if (type === 'player_joined' && payload.id) {
+          db.ref(`rooms/${appState.roomCode}/players/${payload.id}`).set(payload);
+        } else if (type === 'player_completed' && payload.id) {
+          db.ref(`rooms/${appState.roomCode}/players/${payload.id}`).update({
+            completed: true,
+            time: payload.time,
+            attempts: payload.attempts,
+            isCorrect: payload.isCorrect
+          });
+        }
+      }
+      localBus.postMessage(message);
+    }
+
+    // Escucha de mensajes sincronizados
+    localBus.onmessage = (event) => {
+      const { type, room, payload, sender } = event.data;
+      if (room !== appState.roomCode) return;
+      handleIncomingSync(type, payload, sender);
+    };
+
+    function attachFirebaseListeners(room) {
+      if (!isFirebaseActive || !db) return;
+      const roomRef = db.ref(`rooms/${room}`);
+      
+      roomRef.on('child_changed', snap => {
+        if (snap.key !== 'players') {
+          handleIncomingSync(snap.key, snap.val(), null);
+        }
+      });
+      roomRef.on('child_added', snap => {
+        if (snap.key !== 'players') {
+          handleIncomingSync(snap.key, snap.val(), null);
+        }
+      });
+
+      // Sincronización continua de la lista de participantes en la sala
+      const playersRef = db.ref(`rooms/${room}/players`);
+      playersRef.on('child_added', snap => {
+        const p = snap.val();
+        if (p && p.id) {
+          appState.players[p.id] = Object.assign(appState.players[p.id] || {}, p);
+          if (appState.role === 'teacher') {
+            updateLobbyPlayersUI();
+            updateTeacherLiveStatusUI();
+          }
+        }
+      });
+      playersRef.on('child_changed', snap => {
+        const p = snap.val();
+        if (p && p.id) {
+          appState.players[p.id] = Object.assign(appState.players[p.id] || {}, p);
+          if (appState.role === 'teacher') {
+            updateLobbyPlayersUI();
+            updateTeacherLiveStatusUI();
+          }
+        }
+      });
+    }
+
+    function handleIncomingSync(type, data, sender) {
+      if (type === 'player_joined') {
+        appState.players[data.id] = data;
+        updateLobbyPlayersUI();
+      } else if (type === 'game_started') {
+        handleGameStarted(data);
+      } else if (type === 'player_completed') {
+        if (appState.players[data.id]) {
+          appState.players[data.id].completed = true;
+          appState.players[data.id].time = data.time;
+          appState.players[data.id].attempts = data.attempts;
+          appState.players[data.id].isCorrect = data.isCorrect;
+        }
+        updateTeacherLiveStatusUI();
+      } else if (type === 'round_advanced') {
+        handleNextRoundReceived(data);
+      } else if (type === 'game_finished') {
+        handlePodiumReceived(data);
+      } else if (type === 'room_closed') {
+        handleRoomClosedReceived(data);
+      }
+    }
+
+    /* =========================================================
+       7. FLUJO DEL PROFESOR (ORDEN SECUENCIAL DE PANTALLAS)
+       PANTALLA 1: Configuración de la Sala
+       PANTALLA 2: Lobby en Vivo y QR (con sincronización Firebase)
+       PANTALLA 3: Monitor de Ronda Activa
+       ========================================================= */
+    function showTeacherStage(stageNum) {
+      const stage1 = document.getElementById('teacher-stage-config');
+      const stage2 = document.getElementById('teacher-stage-lobby');
+      const stage3 = document.getElementById('teacher-stage-live');
+      if (stage1) stage1.classList.toggle('hidden', stageNum !== 1);
+      if (stage2) stage2.classList.toggle('hidden', stageNum !== 2);
+      if (stage3) stage3.classList.toggle('hidden', stageNum !== 3);
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+    }
+
+    // Acción directa de "Modo Profesor / Proyector": abre primero la Pantalla 1 (Configuración de la Sala) sin contraseña
+    function openTeacherConfigDirectly() {
+      audio.init();
+      appState.role = 'teacher';
+      switchView('view-teacher');
+      showTeacherStage(1);
+    }
+
+    // Navegación del botón "Modo Profesor / Proyector" en bienvenida
+    document.getElementById('btn-select-teacher').addEventListener('click', () => {
+      if (checkTeacherAuth()) {
+        openTeacherConfigDirectly();
+      } else {
+        showAuthModal();
+      }
+    });
+
+    // Manejador interactivo de los chips de configuración
+    document.querySelectorAll('.chip-group').forEach(group => {
+      group.addEventListener('click', (e) => {
+        const btn = e.target.closest('.chip-btn');
+        if (!btn) return;
+        const groupName = btn.dataset.group;
+        if (!groupName) return;
+
+        group.querySelectorAll(`.chip-btn[data-group="${groupName}"]`).forEach(b => b.classList.remove('selected'));
+        btn.classList.add('selected');
+
+        // Mostrar u ocultar selector de dimensión personalizada
+        if (groupName === 'dim') {
+          const customBox = document.getElementById('config-custom-dim-box');
+          if (customBox) {
+            if (btn.dataset.val === 'custom') {
+              customBox.classList.remove('hidden');
+              customBox.style.display = 'flex';
+            } else {
+              customBox.classList.add('hidden');
+              customBox.style.display = 'none';
+            }
+          }
+        }
+      });
+    });
+
+    // PANTALLA 1 -> PANTALLA 2: "Generar Sala y Crear QR"
+    const btnGenerateRoomQr = document.getElementById('btn-generate-room-qr');
+    if (btnGenerateRoomQr) {
+      btnGenerateRoomQr.addEventListener('click', () => {
+        audio.init();
+
+        // 1. Obtener valores configurados
+        const modeBtn = document.querySelector('.chip-btn.selected[data-group="mode"]');
+        const dimBtn = document.querySelector('.chip-btn.selected[data-group="dim"]');
+        const roundsBtn = document.querySelector('.chip-btn.selected[data-group="rounds"]');
+        const timerBtn = document.querySelector('.chip-btn.selected[data-group="timer"]');
+
+        const selectedMode = modeBtn ? modeBtn.dataset.val : 'reduccion';
+        let selectedDim = dimBtn ? dimBtn.dataset.val : '4';
+        if (selectedDim === 'custom') {
+          const customSelect = document.getElementById('config-custom-dim-val');
+          selectedDim = customSelect ? parseInt(customSelect.value) : 7;
+        } else {
+          selectedDim = parseInt(selectedDim) || 4;
+        }
+        const selectedRounds = roundsBtn ? parseInt(roundsBtn.dataset.val) : 5;
+        const selectedTimer = timerBtn ? parseInt(timerBtn.dataset.val) : 0;
+
+        // Actualizar configuración en estado
+        appState.config = {
+          mode: selectedMode,
+          dim: selectedDim,
+          rounds: selectedRounds,
+          timer: selectedTimer
+        };
+
+        // 2. Generar código aleatorio de sala de 4 dígitos
+        appState.roomCode = Math.floor(1000 + Math.random() * 9000).toString();
+        appState.players = {}; // Reiniciar participantes para la nueva sala
+
+        // 3. Guardar esa configuración en Firebase Realtime Database para la sala creada
+        if (isFirebaseActive && db) {
+          db.ref(`rooms/${appState.roomCode}`).set({
+            config: appState.config,
+            code: appState.roomCode,
+            createdAt: Date.now(),
+            state: 'lobby'
+          }).catch(err => {
+            console.warn("Aviso al guardar configuración de sala en Firebase:", err);
+          });
+        }
+
+        // 4. Conectar escuchas en Firebase y emitir evento local
+        attachFirebaseListeners(appState.roomCode);
+        syncBroadcast('room_created', { config: appState.config, code: appState.roomCode });
+
+        // 5. Reflejar código y enlace en el Lobby
+        const lobbyCode = document.getElementById('lobby-room-code');
+        const lobbyDisplay = document.getElementById('lobby-room-code-display');
+        if (lobbyCode) lobbyCode.textContent = appState.roomCode;
+        if (lobbyDisplay) lobbyDisplay.textContent = appState.roomCode;
+
+        const joinUrl = `${window.location.origin}${window.location.pathname}?sala=${appState.roomCode}`;
+        const urlInput = document.getElementById('lobby-direct-url-input');
+        if (urlInput) urlInput.value = joinUrl;
+
+        // Renderizar QR Code gigante a la izquierda
+        const qrContainer = document.getElementById('qrcode-container');
+        if (qrContainer) {
+          qrContainer.innerHTML = '';
+          new QRCode(qrContainer, {
+            text: joinUrl,
+            width: 250,
+            height: 250,
+            colorDark: "#030712",
+            colorLight: "#ffffff",
+            correctLevel: QRCode.CorrectLevel.M
+          });
+        }
+
+        // 6. Actualizar lista de participantes conectados a 0
+        updateLobbyPlayersUI();
+
+        // 7. Transición a Pantalla 2 (Lobby en Vivo y QR)
+        showTeacherStage(2);
+      });
+    }
+
+    // Botón volver a la Pantalla 1 (Configuración) desde el Lobby
+    const lobbyBackConfigBtn = document.getElementById('btn-lobby-back-config');
+    if (lobbyBackConfigBtn) {
+      lobbyBackConfigBtn.addEventListener('click', () => {
+        showTeacherStage(1);
+      });
+    }
+
+    // Botón volver al inicio desde la Configuración
+    const configBackWelcomeBtn = document.getElementById('btn-config-back-welcome');
+    if (configBackWelcomeBtn) {
+      configBackWelcomeBtn.addEventListener('click', () => {
+        switchView('view-welcome');
+      });
+    }
+
+    // Botón volver al inicio desde el Lobby
+    const lobbyBackWelcomeBtn = document.getElementById('btn-lobby-back-welcome');
+    if (lobbyBackWelcomeBtn) {
+      lobbyBackWelcomeBtn.addEventListener('click', () => {
+        switchView('view-welcome');
+      });
+    }
+
+    document.getElementById('btn-select-student').addEventListener('click', () => {
+      audio.init();
+      appState.role = 'student';
+      // Si la URL ya trae parámetro ?sala=XXXX, llenarlo
+      const urlParams = new URLSearchParams(window.location.search);
+      if (urlParams.has('sala')) {
+        document.getElementById('student-room-input').value = urlParams.get('sala').toUpperCase();
+      }
+      switchView('view-student-join');
+    });
+
+    // Botón copiar enlace en Lobby
+    const copyLinkBtn = document.getElementById('btn-copy-lobby-link');
+    if (copyLinkBtn) {
+      copyLinkBtn.addEventListener('click', async () => {
+        const input = document.getElementById('lobby-direct-url-input');
+        try {
+          await navigator.clipboard.writeText(input.value);
+          const feedback = document.getElementById('copy-feedback');
+          feedback.textContent = '✓ ¡Enlace copiado al portapapeles!';
+          setTimeout(() => { feedback.textContent = ''; }, 2500);
+        } catch (e) {
+          input.select();
+          document.execCommand('copy');
+          const feedback = document.getElementById('copy-feedback');
+          feedback.textContent = '✓ ¡Enlace copiado!';
+          setTimeout(() => { feedback.textContent = ''; }, 2500);
+        }
+      });
+    }
+
+    function updateLobbyPlayersUI() {
+      const list = document.getElementById('lobby-players-container');
+      if (!list) return;
+      list.innerHTML = '';
+      const playerArr = Object.values(appState.players);
+      document.getElementById('lobby-player-count').textContent = playerArr.length;
+
+      if (playerArr.length === 0) {
+        list.innerHTML = `
+          <div style="color: var(--text-muted); font-size: 0.85rem; text-align: center; margin-top: 3rem;">
+            Esperando a que los alumnos escaneen el QR e ingresen su nombre...
+          </div>
+        `;
+        return;
+      }
+
+      playerArr.forEach(p => {
+        const item = document.createElement('div');
+        item.className = 'player-pill';
+        item.innerHTML = `
+          <span style="font-weight: 700; color: #fff; display: flex; align-items: center; gap: 0.5rem;">
+            <span style="display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: #10b981;"></span>
+            ${p.name}
+          </span>
+          <span style="font-size: 0.75rem; color: #10b981; font-weight: 700;">✓ Conectado</span>
+        `;
+        list.appendChild(item);
+      });
+    }
+
+    // ETAPA 2 -> ETAPA 3: Iniciar Ronda 1 (Pasa a Monitor de Ronda Activa)
+    document.getElementById('btn-start-game').addEventListener('click', () => {
+      audio.bellStart();
+      appState.currentRound = 1;
+      showTeacherStage(3);
+      startRoundForSession();
+    });
+
+    function startRoundForSession() {
+      let dim = parseInt(appState.config.dim) || 4;
+      const seed = Math.floor(Math.random() * 9000000) + 1000;
+      const matrix = generateMatrix(dim, dim, seed);
+      const sum = matrix.reduce((acc, c) => acc + c.value, 0);
+      const root = calculateDigitalRoot(sum);
+
+      appState.currentMatrix = matrix;
+      appState.solutionDigit = root;
+      appState.roundStartTime = Date.now();
+
+      // Resetear estado de jugadores para la nueva ronda
+      Object.keys(appState.players).forEach(id => {
+        appState.players[id].completed = false;
+        appState.players[id].time = 0;
+      });
+
+      const roundPayload = {
+        round: appState.currentRound,
+        totalRounds: parseInt(appState.config.rounds) || 5,
+        mode: getActiveRoundMode(),
+        dim: dim,
+        seed: seed,
+        timer: parseInt(appState.config.timer) || 0,
+        startTime: appState.roundStartTime
+      };
+
+      syncBroadcast('game_started', roundPayload);
+      setupTeacherLiveView(roundPayload);
+    }
+
+    function getActiveRoundMode() {
+      return appState.config.mode || 'reduccion';
+    }
+
+    function setupTeacherLiveView(data) {
+      showTeacherStage(3);
+      document.getElementById('live-round-badge').textContent = `RONDA ${data.round}/${data.totalRounds}`;
+      const modeNames = {
+        'reduccion': 'MODO REDUCCIÓN (9s)',
+        'tradicional': 'MODO TRADICIONAL',
+        'libre': 'MODO LIBRE'
+      };
+      document.getElementById('live-mode-badge').textContent = modeNames[data.mode] || 'MODO REDUCCIÓN';
+      document.getElementById('teacher-solution-display').textContent = `Solución: Dígito ${appState.solutionDigit}`;
+
+      // Render mini cuadrícula en proyector
+      const matrixContainer = document.getElementById('teacher-matrix-container');
+      matrixContainer.innerHTML = '';
+      matrixContainer.style.gridTemplateColumns = `repeat(${data.dim}, 1fr)`;
+      appState.currentMatrix.forEach(c => {
+        const cell = document.createElement('div');
+        cell.className = 'matrix-cell-teacher';
+        cell.textContent = c.value;
+        matrixContainer.appendChild(cell);
+      });
+
+      updateTeacherLiveStatusUI();
+      startTeacherTimer(data.timer);
+    }
+
+    let liveTimerInterval = null;
+    function startTeacherTimer(limitSec) {
+      if (liveTimerInterval) clearInterval(liveTimerInterval);
+      const timerDisplay = document.getElementById('live-timer-display');
+      const start = Date.now();
+
+      liveTimerInterval = setInterval(() => {
+        const elapsed = Math.floor((Date.now() - start) / 1000);
+        if (limitSec > 0) {
+          const remaining = Math.max(0, limitSec - elapsed);
+          timerDisplay.textContent = `⏱ 00:${remaining.toString().padStart(2, '0')}`;
+          if (remaining === 0) {
+            clearInterval(liveTimerInterval);
+            audio.buzz();
+            confetti({ particleCount: 50, spread: 60 });
+          }
+        } else {
+          timerDisplay.textContent = `⏱ 00:${elapsed.toString().padStart(2, '0')}`;
+        }
+      }, 500);
+    }
+
+    function updateTeacherLiveStatusUI() {
+      const container = document.getElementById('live-players-status-container');
+      if (!container) return;
+      container.innerHTML = '';
+
+      const players = Object.values(appState.players);
+      const completedCount = players.filter(p => p.completed).length;
+      document.getElementById('live-completion-ratio').textContent = `${completedCount} / ${players.length} completados`;
+
+      players.forEach(p => {
+        const row = document.createElement('div');
+        row.className = `status-row ${p.completed ? 'completed' : ''}`;
+        
+        // REGLA CRÍTICA DE PRIVACIDAD: PROHIBIDO mostrar la respuesta numérica que ingresaron
+        const statusHtml = p.completed
+          ? `<span class="badge-status badge-done">✓ Terminado (${p.time}s)</span>`
+          : `<span class="badge-status badge-thinking">Pensando...</span>`;
+
+        row.innerHTML = `
+          <span style="font-weight: 700; color: #fff;">${p.name}</span>
+          ${statusHtml}
+        `;
+        container.appendChild(row);
+      });
+
+      // Si todos han completado, disparar alerta y confeti para el profesor
+      if (players.length > 0 && completedCount === players.length) {
+        if (liveTimerInterval) clearInterval(liveTimerInterval);
+        audio.fanfare();
+        confetti({ particleCount: 80, spread: 80, origin: { y: 0.6 } });
+      }
+    }
+
+    // Siguiente Ronda (habilitado en cualquier momento si decide saltar o continuar)
+    document.getElementById('btn-next-round').addEventListener('click', () => {
+      audio.init();
+      if (appState.currentRound < parseInt(appState.config.rounds)) {
+        appState.currentRound++;
+        showTeacherStage(3);
+        startRoundForSession();
+      } else {
+        // Fin del torneo -> Pódium
+        finishTournamentAndShowPodium();
+      }
+    });
+
+    // Finalizar partida y volver a la configuración del profesor
+    const btnEndSession = document.getElementById('btn-end-session');
+    if (btnEndSession) {
+      btnEndSession.addEventListener('click', () => {
+        audio.init();
+        const confirmEnd = window.confirm("¿Deseas finalizar la sesión actual y regresar a la configuración?");
+        if (!confirmEnd) return;
+
+        // 1. Detener temporizador de la ronda activa
+        if (liveTimerInterval) {
+          clearInterval(liveTimerInterval);
+          liveTimerInterval = null;
+        }
+
+        // 2. Actualizar estado en Firebase Realtime Database
+        if (isFirebaseActive && db && appState.roomCode) {
+          db.ref(`rooms/${appState.roomCode}`).update({
+            state: 'closed',
+            closedAt: Date.now()
+          }).catch(err => {
+            console.warn("Aviso al actualizar estado de sala en Firebase:", err);
+          });
+        }
+
+        // 3. Notificar a los participantes conectados
+        syncBroadcast('room_closed', {
+          room: appState.roomCode,
+          reason: 'teacher_ended'
+        });
+
+        // 4. Limpiar estado de juego y participantes de la sesión finalizada
+        appState.players = {};
+        appState.currentRound = 1;
+        appState.currentMatrix = [];
+
+        // 5. Ocultar el tablero de juego en vivo y regresar limpiamente a la pantalla de Ajustes (Pantalla 1)
+        switchView('view-teacher');
+        showTeacherStage(1);
+      });
+    }
+
+    function finishTournamentAndShowPodium() {
+      if (liveTimerInterval) clearInterval(liveTimerInterval);
+      audio.fanfare();
+      confetti({ particleCount: 150, spread: 100, origin: { y: 0.5 } });
+
+      // Calcular ranking por aciertos, menor número de fallos y menor tiempo acumulado
+      const sorted = Object.values(appState.players).sort((a, b) => {
+        const scoreA = a.score || 0;
+        const scoreB = b.score || 0;
+        if (scoreB !== scoreA) return scoreB - scoreA;
+        const attA = a.attempts || 1;
+        const attB = b.attempts || 1;
+        if (attA !== attB) return attA - attB;
+        return (a.totalTime || 999) - (b.totalTime || 999);
+      });
+
+      syncBroadcast('game_finished', { ranking: sorted });
+      renderPodiumUI(sorted);
+    }
+
+    function renderPodiumUI(sorted) {
+      switchView('view-podium');
+
+      document.getElementById('podium-name-1').textContent = sorted[0] ? sorted[0].name : '-';
+      document.getElementById('podium-score-1').textContent = sorted[0] ? `${sorted[0].score || 0} pts` : '';
+
+      document.getElementById('podium-name-2').textContent = sorted[1] ? sorted[1].name : '-';
+      document.getElementById('podium-score-2').textContent = sorted[1] ? `${sorted[1].score || 0} pts` : '';
+
+      document.getElementById('podium-name-3').textContent = sorted[2] ? sorted[2].name : '-';
+      document.getElementById('podium-score-3').textContent = sorted[2] ? `${sorted[2].score || 0} pts` : '';
+
+      const fullList = document.getElementById('leaderboard-full-list');
+      fullList.innerHTML = '';
+      sorted.forEach((p, idx) => {
+        const row = document.createElement('div');
+        row.style.display = 'flex';
+        row.style.justifyContent = 'space-between';
+        row.style.padding = '0.4rem 0.6rem';
+        row.style.fontSize = '0.85rem';
+        row.style.borderBottom = '1px solid #1e293b';
+        row.innerHTML = `
+          <span><strong>#${idx + 1}</strong> ${p.name}</span>
+          <span style="color: #f59e0b; font-weight: 700;">${p.score || 0} aciertos</span>
+        `;
+        fullList.appendChild(row);
+      });
+    }
+
+    document.getElementById('btn-new-tournament').addEventListener('click', () => {
+      switchView('view-teacher');
+      showTeacherStage(1);
+    });
+
+    /* =========================================================
+       8. FLUJO DEL ALUMNO (MÓVIL RESPONSIVO)
+       ========================================================= */
+    document.getElementById('btn-student-connect').addEventListener('click', () => {
+      audio.init();
+      const name = document.getElementById('student-name-input').value.trim();
+      const room = document.getElementById('student-room-input').value.trim().toUpperCase();
+
+      if (!name) {
+        alert("Por favor, ingresa tu nombre o alias.");
+        return;
+      }
+      if (!room) {
+        alert("Ingresa el código de la sala.");
+        return;
+      }
+
+      appState.studentName = name;
+      appState.roomCode = room;
+
+      attachFirebaseListeners(room);
+
+      // Notificar unión al profesor
+      syncBroadcast('player_joined', {
+        id: appState.studentId,
+        name: name,
+        score: 0,
+        attempts: 0,
+        totalTime: 0
+      });
+
+      switchView('view-student-waiting');
+    });
+
+    function handleGameStarted(data) {
+      if (appState.role !== 'student') return;
+      audio.bellStart();
+
+      appState.currentRound = data.round;
+      appState.currentMatrix = generateMatrix(data.dim, data.dim, data.seed);
+      const sum = appState.currentMatrix.reduce((acc, c) => acc + c.value, 0);
+      appState.solutionDigit = calculateDigitalRoot(sum);
+      appState.roundStartTime = Date.now();
+
+      // Reset estado local
+      appState.studentState = {
+        markedIds: new Set(),
+        eliminatedIds: new Set(),
+        selectedIds: [],
+        typedDigit: null,
+        attempts: 0,
+        hasSubmitted: false
+      };
+
+      document.getElementById('student-round-num').textContent = data.round;
+      document.getElementById('student-total-rounds').textContent = data.totalRounds;
+      const studentModeNames = {
+        'reduccion': 'REDUCCIÓN (9s)',
+        'tradicional': 'TRADICIONAL',
+        'libre': 'MODO LIBRE'
+      };
+      document.getElementById('student-mode-name').textContent = studentModeNames[data.mode] || 'REDUCCIÓN (9s)';
+      document.getElementById('student-visor-digit').textContent = '-';
+      document.getElementById('btn-student-submit').disabled = true;
+
+      renderStudentBoard(data.mode, data.dim);
+      startStudentTimer(data.timer);
+      switchView('view-student-game');
+    }
+
+    function renderStudentBoard(mode, dim) {
+      const grid = document.getElementById('student-matrix-grid');
+      grid.innerHTML = '';
+      grid.style.gridTemplateColumns = `repeat(${dim}, 1fr)`;
+      grid.style.gridTemplateRows = `repeat(${dim}, 1fr)`;
+
+      appState.currentMatrix.forEach(cell => {
+        const cellEl = document.createElement('div');
+        cellEl.className = 'grid-cell';
+        cellEl.textContent = cell.value;
+        cellEl.dataset.id = cell.id;
+
+        cellEl.addEventListener('click', () => {
+          handleStudentCellClick(cell, cellEl, mode);
+        });
+
+        grid.appendChild(cellEl);
+      });
+    }
+
+    function handleStudentCellClick(cell, cellEl, mode) {
+      if (appState.studentState.hasSubmitted) return;
+      audio.tap();
+
+      if (mode === 'tradicional' || mode === 'libre') {
+        // Sombreado libre para control de cálculo mental progresivo
+        if (appState.studentState.markedIds.has(cell.id)) {
+          appState.studentState.markedIds.delete(cell.id);
+          cellEl.classList.remove('highlighted-trad');
+        } else {
+          appState.studentState.markedIds.add(cell.id);
+          cellEl.classList.add('highlighted-trad');
+        }
+      } else {
+        // Modo Reducción:
+        // 1. Ceros y Nueves directos
+        if (cell.value === 0 || cell.value === 9) {
+          appState.studentState.eliminatedIds.add(cell.id);
+          cellEl.classList.add('eliminated-red');
+          audio.groupMatch();
+          return;
+        }
+
+        // Si ya está eliminada, ignorar
+        if (appState.studentState.eliminatedIds.has(cell.id)) return;
+
+        // 2. Selección libre consecutiva (sin límite de celdas)
+        const selIdx = appState.studentState.selectedIds.indexOf(cell.id);
+        if (selIdx >= 0) {
+          appState.studentState.selectedIds.splice(selIdx, 1);
+          cellEl.classList.remove('selected-red');
+        } else {
+          appState.studentState.selectedIds.push(cell.id);
+          cellEl.classList.add('selected-red');
+
+          // Evaluar suma del grupo seleccionado
+          const selectedCells = appState.currentMatrix.filter(c => appState.studentState.selectedIds.includes(c.id));
+          const currentSum = selectedCells.reduce((acc, c) => acc + c.value, 0);
+
+          // Si suma 9 o reduce a 9 (ej. 18, 27)
+          if (currentSum > 0 && currentSum % 9 === 0 && appState.studentState.selectedIds.length >= 2) {
+            audio.groupMatch();
+            appState.studentState.selectedIds.forEach(id => {
+              appState.studentState.eliminatedIds.add(id);
+              const el = document.querySelector(`.grid-cell[data-id="${id}"]`);
+              if (el) {
+                el.classList.remove('selected-red');
+                el.classList.add('eliminated-red');
+              }
+            });
+            appState.studentState.selectedIds = [];
+          }
+        }
+      }
+    }
+
+    // Teclado táctil integrado
+    document.querySelectorAll('.keypad-btn').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (appState.studentState.hasSubmitted) return;
+        audio.tap();
+        const digit = parseInt(btn.dataset.key);
+        appState.studentState.typedDigit = digit;
+        document.getElementById('student-visor-digit').textContent = digit;
+        document.getElementById('btn-student-submit').disabled = false;
+      });
+    });
+
+    // Envío y comprobación estricta sin spoiler
+    document.getElementById('btn-student-submit').addEventListener('click', () => {
+      if (appState.studentState.hasSubmitted || appState.studentState.typedDigit === null) return;
+      audio.init();
+
+      const typed = appState.studentState.typedDigit;
+      const isCorrect = (typed === appState.solutionDigit) || (appState.solutionDigit === 9 && typed === 0);
+
+      appState.studentState.attempts++;
+
+      if (isCorrect) {
+        // Respuesta Correcta
+        audio.groupMatch();
+        appState.studentState.hasSubmitted = true;
+        document.getElementById('btn-student-submit').disabled = true;
+        document.getElementById('btn-student-submit').textContent = "✓ ¡Respuesta Enviada!";
+
+        const timeTaken = ((Date.now() - appState.roundStartTime) / 1000).toFixed(1);
+
+        // Notificar al profesor
+        syncBroadcast('player_completed', {
+          id: appState.studentId,
+          name: appState.studentName,
+          time: parseFloat(timeTaken),
+          attempts: appState.studentState.attempts,
+          isCorrect: true
+        });
+
+        showToastFeedback("¡Excelente! Cálculo correcto enviado.");
+      } else {
+        // REGLA ESTRICTA DE ERROR: NUNCA DECIRLE LA RESPUESTA CORRECTA
+        audio.buzz();
+        showToastFeedback("Cálculo incorrecto. Revisa tu reducción y vuelve a intentar.");
+        // Registrar intento pero dejar que siga intentando
+        syncBroadcast('player_attempt_failed', {
+          id: appState.studentId,
+          attempts: appState.studentState.attempts
+        });
+      }
+    });
+
+    function showToastFeedback(msg) {
+      const toast = document.getElementById('toast-feedback');
+      toast.textContent = msg;
+      toast.style.display = 'block';
+      setTimeout(() => {
+        toast.style.display = 'none';
+      }, 2200);
+    }
+
+    let studentTimerInterval = null;
+    function startStudentTimer(limitSec) {
+      if (studentTimerInterval) clearInterval(studentTimerInterval);
+      const timerBox = document.getElementById('student-timer-box');
+      const start = Date.now();
+
+      studentTimerInterval = setInterval(() => {
+        const elapsed = ((Date.now() - start) / 1000).toFixed(1);
+        timerBox.innerHTML = `⏱ <strong>${elapsed}s</strong>`;
+      }, 200);
+    }
+
+    function handleNextRoundReceived(data) {
+      if (appState.role === 'student') {
+        handleGameStarted(data);
+      }
+    }
+
+    function handlePodiumReceived(data) {
+      if (studentTimerInterval) clearInterval(studentTimerInterval);
+      renderPodiumUI(data.ranking);
+    }
+
+    function handleRoomClosedReceived() {
+      if (appState.role === 'student') {
+        if (studentTimerInterval) clearInterval(studentTimerInterval);
+        alert("El docente ha finalizado la sesión o cerrado la sala.");
+        switchView('view-student-join');
+      }
+    }
+
+    // Control de Pantalla Completa
+    const btnTallerFs = document.getElementById('btn-toggle-taller-fullscreen');
+    if (btnTallerFs) {
+      btnTallerFs.addEventListener('click', () => {
+        if (!document.fullscreenElement) {
+          document.documentElement.requestFullscreen().catch((err) => console.warn(err));
+          btnTallerFs.textContent = '✕';
+        } else {
+          if (document.exitFullscreen) {
+            document.exitFullscreen().catch((err) => console.warn(err));
+            btnTallerFs.textContent = '⛶';
+          }
+        }
+      });
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+      if (btnTallerFs) {
+        btnTallerFs.textContent = document.fullscreenElement ? '✕' : '⛶';
+      }
+    });
+
+    // Activar pantalla completa al interactuar por primera vez
+    const handleFirstUserTouch = () => {
+      if (!document.fullscreenElement) {
+        document.documentElement.requestFullscreen().catch(() => {});
+      }
+      window.removeEventListener('click', handleFirstUserTouch);
+      window.removeEventListener('touchstart', handleFirstUserTouch);
+    };
+    window.addEventListener('click', handleFirstUserTouch, { once: true });
+    window.addEventListener('touchstart', handleFirstUserTouch, { once: true });
+
+    // Auto-detección por parámetro en URL para alumnos al escanear QR y control de acceso
+    window.addEventListener('DOMContentLoaded', () => {
+      const isStudent = isStudentUrlException();
+      if (isStudent) {
+        // Excepción de Alumnos: Acceso directo sin contraseña ni modal
+        hideAuthModal();
+        const params = new URLSearchParams(window.location.search);
+        const code = (params.get('sala') || params.get('room') || '').toUpperCase();
+        if (code) {
+          const roomInput = document.getElementById('student-room-input');
+          if (roomInput) roomInput.value = code;
+        }
+        appState.role = 'student';
+        switchView('view-student-join');
+      } else {
+        // Pantalla de control / Máster: exige autenticación o licencia válida
+        if (!checkTeacherAuth()) {
+          showAuthModal();
+        } else {
+          hideAuthModal();
+        }
+      }
+      if (window.lucide) {
+        window.lucide.createIcons();
+      }
+    });
+  </script>
+</body>
+</html>

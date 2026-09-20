@@ -1,0 +1,8 @@
+{
+  "name": "Reducción cuadricula aula",
+  "description": "Entrena el descarte y cálculo del número reducido para comprobar sumas al instante.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
