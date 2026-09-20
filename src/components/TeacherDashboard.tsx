@@ -22,7 +22,14 @@ import {
   Play,
   Clock,
   Zap,
+  Crown,
+  Sparkles,
+  RotateCcw,
+  Award,
+  Medal,
+  PartyPopper,
 } from 'lucide-react';
+import confetti from 'canvas-confetti';
 import { ref, set, update, onValue, off, serverTimestamp } from 'firebase/database';
 import { ClassroomConfig } from '../types';
 import { getFirebaseRtdb } from '../services/firebaseAuth';
@@ -70,7 +77,8 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   // 1 = Configuración previa (3x3, 4x4, 5x5, tiempo, modo)
   // 2 = Lobby QR y Participantes en Vivo
   // 3 = Monitor de Progreso en Tiempo Real por Rondas
-  const [stage, setStage] = useState<1 | 2 | 3>(1);
+  // 4 = ¡Gran Final y Premiación! (Podio de Ganadores)
+  const [stage, setStage] = useState<1 | 2 | 3 | 4>(1);
 
   // Parámetros de la sala
   const [selectedSize, setSelectedSize] = useState<number>(config.rows || 4);
@@ -167,13 +175,13 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           semilla: currentSeed,
           seed: currentSeed,
         },
-        estado: stage === 3 ? 'jugando' : 'esperando',
-        status: stage === 3 ? 'playing' : 'waiting',
+        estado: stage === 4 ? 'podio' : stage === 3 ? 'jugando' : 'esperando',
+        status: stage === 4 ? 'podium' : stage === 3 ? 'playing' : 'waiting',
         rondaActual: 1,
         actualizadoEn: serverTimestamp(),
       };
 
-      set(activeRoomRef, roomPayload)
+      update(activeRoomRef, roomPayload)
         .then(() => {
           if (isCurrent) setIsConnecting(false);
         })
@@ -353,13 +361,61 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     }
   };
 
-  // Acción: Finalizar Dinámica y Retorno Limpio a la Configuración Inicial
+  // Acción: Finalizar Dinámica -> Transición al Podio de Ganadores (Etapa 4)
   const handleEndDynamic = async () => {
-    const confirmEnd = window.confirm(
-      '¿Deseas finalizar la dinámica actual para todos los participantes y regresar a la configuración inicial?'
-    );
-    if (!confirmEnd) return;
+    try {
+      const rtdb = getFirebaseRtdb();
+      if (rtdb && roomCode) {
+        await update(ref(rtdb, `salas/${roomCode}`), {
+          estado: 'podio',
+          status: 'podium',
+          finalizadoEn: serverTimestamp(),
+        });
+      }
+    } catch (err) {
+      console.warn('Aviso notificando estado de podio en Firebase:', err);
+    }
 
+    // Cambiar a la pantalla de Podio y Premiación
+    setStage(4);
+  };
+
+  // Acción: Reiniciar con misma sala (vuelve al lobby manteniendo a los alumnos)
+  const handleRestartSameRoom = async () => {
+    try {
+      const rtdb = getFirebaseRtdb();
+      if (rtdb && roomCode) {
+        // Actualizar estado de la sala a 'esperando'
+        await update(ref(rtdb, `salas/${roomCode}`), {
+          estado: 'esperando',
+          status: 'waiting',
+          rondaActual: 1,
+          reiniciadoEn: serverTimestamp(),
+        });
+
+        // Restablecer el estado de cada participante
+        if (connectedPlayers.length > 0) {
+          const updates: Record<string, any> = {};
+          connectedPlayers.forEach((p) => {
+            updates[`salas/${roomCode}/jugadores/${p.id}/estado`] = 'esperando';
+            updates[`salas/${roomCode}/jugadores/${p.id}/status`] = 'waiting';
+            updates[`salas/${roomCode}/jugadores/${p.id}/rondaActual`] = 1;
+            updates[`salas/${roomCode}/jugadores/${p.id}/rondas`] = null;
+            updates[`salas/${roomCode}/jugadores/${p.id}/tiempo`] = null;
+            updates[`salas/${roomCode}/jugadores/${p.id}/isFinished`] = false;
+          });
+          await update(ref(rtdb), updates);
+        }
+      }
+    } catch (err) {
+      console.warn('Aviso reiniciando con misma sala:', err);
+    }
+
+    setStage(2);
+  };
+
+  // Acción: Salir a Configuración (cierra la sala actual y regresa a la pantalla de configuración inicial)
+  const handleExitToConfig = async () => {
     try {
       const rtdb = getFirebaseRtdb();
       if (rtdb && roomCode) {
@@ -373,10 +429,132 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
       console.warn('Aviso finalizando dinámica en Firebase:', err);
     }
 
-    // Regresar a la Pantalla de Configuración Inicial (Etapa 1)
     setStage(1);
     setConnectedPlayers([]);
+    setRoomCode(Math.floor(1000 + Math.random() * 9000).toString());
   };
+
+  // Lanzamiento manual de confeti para el podio
+  const handleLaunchManualConfetti = () => {
+    try {
+      confetti({
+        particleCount: 90,
+        spread: 80,
+        origin: { y: 0.6 },
+        colors: ['#f59e0b', '#fbbf24', '#fef08a', '#10b981', '#3b82f6', '#ec4899', '#ffffff'],
+        zIndex: 9999,
+      });
+    } catch {}
+  };
+
+  // Animación continua de fuegos artificiales y confeti en el Podio (Etapa 4)
+  useEffect(() => {
+    if (stage !== 4) return;
+
+    // Disparo inicial explosivo de confeti dorado y multicolor
+    try {
+      const count = 220;
+      const defaults = { origin: { y: 0.7 }, zIndex: 9999 };
+
+      const fire = (particleRatio: number, opts: confetti.Options) => {
+        confetti({
+          ...defaults,
+          ...opts,
+          particleCount: Math.floor(count * particleRatio),
+        });
+      };
+
+      fire(0.25, { spread: 26, startVelocity: 55 });
+      fire(0.2, { spread: 60 });
+      fire(0.35, { spread: 100, decay: 0.91, scalar: 0.8 });
+      fire(0.1, { spread: 120, startVelocity: 25, decay: 0.92, scalar: 1.2 });
+      fire(0.1, { spread: 120, startVelocity: 45 });
+    } catch {}
+
+    // Ráfagas continuas de fuegos artificiales desde los laterales
+    const interval = setInterval(() => {
+      try {
+        // Ráfaga izquierda
+        confetti({
+          particleCount: 28,
+          angle: 60,
+          spread: 55,
+          origin: { x: 0.05, y: 0.7 },
+          colors: ['#f59e0b', '#fbbf24', '#fef08a', '#10b981', '#3b82f6', '#ec4899'],
+          zIndex: 9999,
+        });
+        // Ráfaga derecha
+        confetti({
+          particleCount: 28,
+          angle: 120,
+          spread: 55,
+          origin: { x: 0.95, y: 0.7 },
+          colors: ['#f59e0b', '#fbbf24', '#fef08a', '#10b981', '#3b82f6', '#ec4899'],
+          zIndex: 9999,
+        });
+      } catch {}
+    }, 2200);
+
+    return () => {
+      clearInterval(interval);
+      try {
+        confetti.reset();
+      } catch {}
+    };
+  }, [stage]);
+
+  // Cálculo del Podio (Top 3):
+  // Ordena según rondas completadas descendente y tiempo total acumulado ascendente
+  const rankedPlayers = useMemo(() => {
+    if (!connectedPlayers || connectedPlayers.length === 0) return [];
+
+    return [...connectedPlayers]
+      .map((p) => {
+        let sumTime = 0;
+        let completedCount = 0;
+
+        if (p.rondas && typeof p.rondas === 'object') {
+          Object.values(p.rondas).forEach((r) => {
+            if (r && typeof r.tiempo === 'number' && r.tiempo > 0 && r.completada) {
+              sumTime += r.tiempo;
+              completedCount++;
+            }
+          });
+        } else if (typeof p.time === 'number' && p.time > 0) {
+          sumTime = p.time;
+          completedCount = 1;
+        } else if (typeof p.totalTime === 'number' && p.totalTime > 0) {
+          sumTime = p.totalTime;
+          completedCount = 1;
+        }
+
+        return {
+          id: p.id,
+          name: p.name || 'Participante',
+          totalTime: sumTime > 0 ? +sumTime.toFixed(1) : 0,
+          completedRounds: completedCount,
+          hasTime: sumTime > 0,
+        };
+      })
+      .sort((a, b) => {
+        // Prioridad 1: Más rondas completadas
+        if (b.completedRounds !== a.completedRounds) {
+          return b.completedRounds - a.completedRounds;
+        }
+        // Prioridad 2: Menor tiempo total acumulado (más rápido)
+        if (a.hasTime && b.hasTime) {
+          return a.totalTime - b.totalTime;
+        }
+        if (a.hasTime) return -1;
+        if (b.hasTime) return 1;
+        return 0;
+      });
+  }, [connectedPlayers]);
+
+  const firstPlace = rankedPlayers[0] || null;
+  const secondPlace = rankedPlayers[1] || null;
+  const thirdPlace = rankedPlayers[2] || null;
+  const otherPlaces = rankedPlayers.slice(3);
 
   // Acción de Pantalla Completa segura por clic del usuario
   const handleToggleFullscreenDirect = () => {
@@ -423,6 +601,7 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   {stage === 1 && 'Paso 1: Configuración de la Sala'}
                   {stage === 2 && 'Paso 2: Lobby QR y Participantes'}
                   {stage === 3 && 'Paso 3: Monitor de Ronda Activa'}
+                  {stage === 4 && 'Paso 4: ¡Gran Final y Premiación!'}
                 </span>
                 {isConnecting && stage !== 1 && (
                   <span className="text-[10px] text-amber-400 flex items-center gap-1">
@@ -1014,6 +1193,295 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
                   </p>
                 </div>
               )}
+            </div>
+          </section>
+        )}
+
+        {/* ========================================================================= */}
+        {/* ETAPA 4: ¡GRAN FINAL Y PREMIACIÓN! (PODIO DE GANADORES)                   */}
+        {/* ========================================================================= */}
+        {stage === 4 && (
+          <section
+            id="teacher-stage-podium"
+            className="space-y-8 animate-in fade-in zoom-in-95 duration-500"
+          >
+            {/* Cabecera Triunfal de Premiación */}
+            <div className="relative overflow-hidden rounded-3xl bg-gradient-to-b from-amber-500/15 via-stone-900/90 to-stone-950 border border-amber-500/30 p-6 sm:p-10 text-center shadow-2xl">
+              {/* Resplandor de fondo */}
+              <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_top,_var(--tw-gradient-stops))] from-amber-500/20 via-transparent to-transparent pointer-events-none" />
+
+              <div className="relative z-10 space-y-3">
+                <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs sm:text-sm font-extrabold uppercase tracking-widest shadow-lg shadow-amber-500/20">
+                  <Crown className="w-4 h-4 text-amber-400 animate-bounce" />
+                  <span>¡Gran Final y Premiación!</span>
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                </div>
+
+                <h2 className="text-3xl sm:text-5xl font-black text-white font-cinzel tracking-tight drop-shadow-md">
+                  Podio de Campeones
+                </h2>
+
+                <p className="text-sm sm:text-base text-stone-300 max-w-xl mx-auto">
+                  Clasificación final calculada por tiempo total acumulado en las rondas de la cuadrícula {selectedSize}×{selectedSize}.
+                </p>
+
+                <div className="flex items-center justify-center gap-4 text-xs font-mono text-amber-400/80 pt-1">
+                  <span>Sala: {roomCode}</span>
+                  <span>•</span>
+                  <span>{selectedRounds} Rondas</span>
+                  <span>•</span>
+                  <span>{connectedPlayers.length} Participantes</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Estructura del Podio Olímpico (Top 3) */}
+            {rankedPlayers.length === 0 ? (
+              <div className="bg-stone-900/60 border border-stone-800 rounded-3xl p-12 text-center text-stone-400 space-y-3">
+                <Trophy className="w-12 h-12 text-stone-600 mx-auto" />
+                <h3 className="text-lg font-bold text-white">Sin registros de tiempo</h3>
+                <p className="text-xs max-w-md mx-auto text-stone-400">
+                  Los participantes aún no completaron rondas registradas en esta dinámica.
+                </p>
+              </div>
+            ) : (
+              <div className="space-y-8">
+                {/* Visualización del Podio 3D / Escalones */}
+                <div className="bg-stone-900/40 border border-stone-800/80 rounded-3xl p-4 sm:p-8 pt-8 sm:pt-14 shadow-2xl overflow-hidden relative">
+                  {/* Luz ambiental dorada central */}
+                  <div className="absolute top-0 left-1/2 -translate-x-1/2 w-96 h-48 bg-amber-500/10 blur-3xl pointer-events-none" />
+
+                  <div className="flex items-end justify-center gap-3 sm:gap-6 max-w-3xl mx-auto min-h-[360px] sm:min-h-[440px] px-2 sm:px-4">
+                    {/* 2.º Lugar - Plata 🥈 (Lado Izquierdo, escalón medio) */}
+                    {secondPlace ? (
+                      <div className="flex-1 max-w-[200px] sm:max-w-[220px] flex flex-col items-center">
+                        {/* Avatar y Datos del 2.º Lugar */}
+                        <div className="flex flex-col items-center text-center mb-3 w-full animate-in fade-in slide-in-from-bottom-6 duration-700">
+                          <div className="relative mb-2">
+                            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-slate-800 border-2 border-slate-300 flex items-center justify-center text-slate-200 font-black text-lg sm:text-xl shadow-[0_0_20px_rgba(203,213,225,0.3)]">
+                              {secondPlace.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="absolute -top-2.5 -right-2 w-6 h-6 rounded-full bg-slate-200 text-stone-950 font-black text-xs flex items-center justify-center shadow-md">
+                              🥈
+                            </div>
+                          </div>
+
+                          <h4
+                            className="font-bold text-sm sm:text-base text-stone-100 truncate w-full px-1"
+                            title={secondPlace.name}
+                          >
+                            {secondPlace.name}
+                          </h4>
+
+                          <div className="mt-1 px-2.5 py-0.5 rounded-full bg-slate-300 text-stone-950 font-black font-mono text-xs sm:text-sm shadow-sm flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5" />
+                            <span>{secondPlace.totalTime > 0 ? `${secondPlace.totalTime}s` : 'Completado'}</span>
+                          </div>
+
+                          <span className="text-[11px] text-stone-400 font-medium mt-0.5">
+                            {secondPlace.completedRounds} {secondPlace.completedRounds === 1 ? 'ronda' : 'rondas'}
+                          </span>
+                        </div>
+
+                        {/* Pedestal de Plata */}
+                        <div className="w-full h-44 sm:h-56 rounded-t-2xl sm:rounded-t-3xl border-t-2 border-x-2 border-slate-400/80 bg-gradient-to-b from-slate-400/30 via-slate-900/80 to-stone-950 flex flex-col items-center justify-start pt-4 sm:pt-6 shadow-[0_0_25px_rgba(203,213,225,0.15)] relative">
+                          <span className="text-4xl sm:text-6xl font-black font-cinzel text-slate-300 drop-shadow-[0_0_15px_rgba(203,213,225,0.4)]">
+                            2
+                          </span>
+                          <span className="text-[10px] sm:text-xs font-black tracking-widest text-slate-300 uppercase px-2.5 py-0.5 rounded-full bg-slate-400/20 border border-slate-300/30 mt-1 sm:mt-2">
+                            Plata
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex-1 max-w-[200px] hidden sm:block opacity-0" />
+                    )}
+
+                    {/* 1.er Lugar - Oro 🥇 (Posición Central, escalón más alto) */}
+                    {firstPlace && (
+                      <div className="flex-1 max-w-[220px] sm:max-w-[260px] flex flex-col items-center z-10">
+                        {/* Avatar y Datos del 1.er Lugar */}
+                        <div className="flex flex-col items-center text-center mb-3 w-full animate-in fade-in slide-in-from-bottom-8 duration-500">
+                          <Crown className="w-7 h-7 text-amber-300 drop-shadow-[0_0_12px_rgba(245,158,11,0.8)] mb-1 animate-pulse" />
+
+                          <div className="relative mb-2">
+                            <div className="w-18 h-18 sm:w-22 sm:h-22 rounded-2xl bg-amber-500/20 border-3 border-amber-400 flex items-center justify-center text-amber-300 font-black text-2xl sm:text-3xl shadow-[0_0_30px_rgba(245,158,11,0.5)]">
+                              {firstPlace.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="absolute -top-2.5 -right-2 w-7 h-7 rounded-full bg-amber-400 text-stone-950 font-black text-sm flex items-center justify-center shadow-lg">
+                              🥇
+                            </div>
+                          </div>
+
+                          <h4
+                            className="font-black text-base sm:text-lg text-white truncate w-full px-1 tracking-tight"
+                            title={firstPlace.name}
+                          >
+                            {firstPlace.name}
+                          </h4>
+
+                          <div className="mt-1 px-3.5 py-1 rounded-full bg-amber-400 text-stone-950 font-black font-mono text-sm sm:text-base shadow-lg shadow-amber-500/40 flex items-center gap-1.5">
+                            <Clock className="w-4 h-4 stroke-[2.5]" />
+                            <span>{firstPlace.totalTime > 0 ? `${firstPlace.totalTime}s` : 'Completado'}</span>
+                          </div>
+
+                          <span className="text-xs text-amber-300 font-semibold mt-0.5">
+                            {firstPlace.completedRounds} {firstPlace.completedRounds === 1 ? 'ronda' : 'rondas'} completadas
+                          </span>
+                        </div>
+
+                        {/* Pedestal de Oro */}
+                        <div className="w-full h-60 sm:h-76 rounded-t-2xl sm:rounded-t-3xl border-t-2 border-x-2 border-amber-400 bg-gradient-to-b from-amber-500/40 via-amber-950/80 to-stone-950 flex flex-col items-center justify-start pt-5 sm:pt-7 shadow-[0_0_35px_rgba(245,158,11,0.3)] relative">
+                          <span className="text-6xl sm:text-8xl font-black font-cinzel text-amber-400 drop-shadow-[0_0_25px_rgba(245,158,11,0.6)]">
+                            1
+                          </span>
+                          <span className="text-xs sm:text-sm font-black tracking-widest text-amber-300 uppercase px-3 py-1 rounded-full bg-amber-500/25 border border-amber-400/50 mt-1 sm:mt-2 shadow-sm">
+                            Campeón Oro
+                          </span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* 3.er Lugar - Bronce 🥉 (Lado Derecho, escalón bajo) */}
+                    {thirdPlace ? (
+                      <div className="flex-1 max-w-[200px] sm:max-w-[220px] flex flex-col items-center">
+                        {/* Avatar y Datos del 3.er Lugar */}
+                        <div className="flex flex-col items-center text-center mb-3 w-full animate-in fade-in slide-in-from-bottom-4 duration-700">
+                          <div className="relative mb-2">
+                            <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-amber-950/60 border-2 border-amber-700 flex items-center justify-center text-amber-400 font-black text-lg sm:text-xl shadow-[0_0_15px_rgba(180,83,9,0.3)]">
+                              {thirdPlace.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="absolute -top-2.5 -right-2 w-6 h-6 rounded-full bg-amber-700 text-stone-100 font-black text-xs flex items-center justify-center shadow-md">
+                              🥉
+                            </div>
+                          </div>
+
+                          <h4
+                            className="font-bold text-sm sm:text-base text-stone-200 truncate w-full px-1"
+                            title={thirdPlace.name}
+                          >
+                            {thirdPlace.name}
+                          </h4>
+
+                          <div className="mt-1 px-2.5 py-0.5 rounded-full bg-amber-800 text-amber-100 font-black font-mono text-xs sm:text-sm shadow-sm flex items-center gap-1">
+                            <Clock className="w-3.5 h-3.5" />
+                            <span>{thirdPlace.totalTime > 0 ? `${thirdPlace.totalTime}s` : 'Completado'}</span>
+                          </div>
+
+                          <span className="text-[11px] text-stone-400 font-medium mt-0.5">
+                            {thirdPlace.completedRounds} {thirdPlace.completedRounds === 1 ? 'ronda' : 'rondas'}
+                          </span>
+                        </div>
+
+                        {/* Pedestal de Bronce */}
+                        <div className="w-full h-32 sm:h-40 rounded-t-2xl sm:rounded-t-3xl border-t-2 border-x-2 border-amber-700/80 bg-gradient-to-b from-amber-800/30 via-amber-950/80 to-stone-950 flex flex-col items-center justify-start pt-3 sm:pt-5 shadow-[0_0_20px_rgba(180,83,9,0.15)] relative">
+                          <span className="text-4xl sm:text-5xl font-black font-cinzel text-amber-600 drop-shadow-[0_0_15px_rgba(217,119,6,0.3)]">
+                            3
+                          </span>
+                          <span className="text-[10px] sm:text-xs font-black tracking-widest text-amber-400 uppercase px-2.5 py-0.5 rounded-full bg-amber-800/30 border border-amber-700/40 mt-1 sm:mt-2">
+                            Bronce
+                          </span>
+                        </div>
+                      </div>
+                    ) : (
+                      <div className="flex-1 max-w-[200px] hidden sm:block opacity-0" />
+                    )}
+                  </div>
+                </div>
+
+                {/* Tabla de Clasificación General (4.º en adelante si existen) */}
+                {otherPlaces.length > 0 && (
+                  <div className="bg-stone-900/60 border border-stone-800 rounded-3xl p-5 sm:p-6 space-y-4">
+                    <div className="flex items-center justify-between">
+                      <h3 className="text-sm sm:text-base font-bold text-white flex items-center gap-2">
+                        <Users className="w-4 h-4 text-amber-400" />
+                        <span>Tabla General de Posiciones</span>
+                      </h3>
+                      <span className="text-xs text-stone-400">
+                        {otherPlaces.length} participantes adicionales
+                      </span>
+                    </div>
+
+                    <div className="divide-y divide-stone-800/80">
+                      {otherPlaces.map((player, idx) => {
+                        const rankNum = idx + 4;
+                        return (
+                          <div
+                            key={player.id}
+                            className="py-3 flex items-center justify-between gap-3 text-sm"
+                          >
+                            <div className="flex items-center gap-3">
+                              <span className="w-7 h-7 rounded-xl bg-stone-800 text-stone-400 font-mono font-bold text-xs flex items-center justify-center shrink-0">
+                                #{rankNum}
+                              </span>
+                              <div className="w-8 h-8 rounded-xl bg-stone-800 text-stone-200 font-bold text-xs flex items-center justify-center shrink-0">
+                                {player.name.charAt(0).toUpperCase()}
+                              </div>
+                              <span className="font-semibold text-stone-200">{player.name}</span>
+                            </div>
+
+                            <div className="flex items-center gap-4 text-right">
+                              <span className="text-xs text-stone-400 hidden sm:inline">
+                                {player.completedRounds} {player.completedRounds === 1 ? 'ronda' : 'rondas'}
+                              </span>
+                              <span className="font-mono font-bold text-xs sm:text-sm text-stone-200 bg-stone-800/80 px-2.5 py-1 rounded-lg border border-stone-700/60">
+                                {player.totalTime > 0 ? `${player.totalTime}s` : '—'}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Barra de Controles de la Dinámica para el Instructor */}
+            <div className="bg-stone-900/90 border border-stone-800/90 rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4 backdrop-blur-md shadow-2xl">
+              <div className="flex items-center gap-3 text-left w-full sm:w-auto">
+                <div className="w-10 h-10 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
+                  <Sparkles className="w-5 h-5" />
+                </div>
+                <div>
+                  <h4 className="text-sm font-bold text-white">Controles de Dinámica</h4>
+                  <p className="text-xs text-stone-400">
+                    Sala {roomCode} • {connectedPlayers.length} alumnos registrados
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-3 w-full sm:w-auto flex-wrap justify-end">
+                <button
+                  id="btn-podium-more-confetti"
+                  onClick={handleLaunchManualConfetti}
+                  className="px-3.5 py-2.5 bg-stone-800 hover:bg-stone-700 text-amber-300 font-semibold rounded-xl text-xs sm:text-sm border border-stone-700 cursor-pointer flex items-center gap-2 transition-colors"
+                  title="Lanzar ráfaga extra de confeti"
+                >
+                  <PartyPopper className="w-4 h-4 text-amber-400" />
+                  <span>¡Más Confeti!</span>
+                </button>
+
+                <button
+                  id="btn-podium-restart-room"
+                  onClick={handleRestartSameRoom}
+                  className="px-4 py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-black rounded-xl text-xs sm:text-sm shadow-lg shadow-amber-500/25 cursor-pointer flex items-center gap-2 transition-all"
+                  title="Reiniciar dinámica manteniendo el código y a los alumnos en el lobby"
+                >
+                  <RotateCcw className="w-4 h-4 stroke-[2.5]" />
+                  <span>Reiniciar con misma sala</span>
+                </button>
+
+                <button
+                  id="btn-podium-exit-config"
+                  onClick={handleExitToConfig}
+                  className="px-4 py-2.5 bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-white font-bold rounded-xl text-xs sm:text-sm border border-stone-700 cursor-pointer flex items-center gap-2 transition-colors"
+                  title="Cerrar esta sala y regresar al menú de configuración inicial"
+                >
+                  <XCircle className="w-4 h-4 text-rose-400" />
+                  <span>Salir a Configuración</span>
+                </button>
+              </div>
             </div>
           </section>
         )}

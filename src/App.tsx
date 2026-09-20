@@ -228,8 +228,41 @@ export default function App() {
   const [isResultOpen, setIsResultOpen] = useState(false);
   const [isStudentHelpOpen, setIsStudentHelpOpen] = useState(false);
   const [isStudentFinishedOpen, setIsStudentFinishedOpen] = useState(false);
+  const [isPodiumActiveForStudent, setIsPodiumActiveForStudent] = useState(false);
   const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
+
+  // Escuchar si el profesor pasa la sala a 'podio' para notificar al alumno
+  useEffect(() => {
+    if (!activeStudentRoom?.roomCode) {
+      setIsPodiumActiveForStudent(false);
+      return;
+    }
+
+    try {
+      const rtdb = getFirebaseRtdb();
+      if (!rtdb) return;
+
+      const roomRef = ref(rtdb, `salas/${activeStudentRoom.roomCode}`);
+      const unsub = onValue(roomRef, (snapshot) => {
+        if (snapshot.exists()) {
+          const val = snapshot.val();
+          const st = val?.estado || val?.status;
+          if (st === 'podio' || st === 'podium') {
+            setIsPodiumActiveForStudent(true);
+          } else {
+            setIsPodiumActiveForStudent(false);
+          }
+        }
+      });
+
+      return () => {
+        off(roomRef);
+      };
+    } catch (e) {
+      console.warn('Aviso escuchando estado de podio para el alumno:', e);
+    }
+  }, [activeStudentRoom?.roomCode]);
 
   const [resultEvaluation, setResultEvaluation] = useState<{
     isCorrect: boolean;
@@ -1002,6 +1035,51 @@ export default function App() {
               : handleRestartStudentSession
           }
         />
+
+        {/* Modal de Podio y Premiación en Pantalla del Participante */}
+        {isPodiumActiveForStudent && (
+          <div
+            id="student-podium-modal"
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md select-none animate-in fade-in duration-200"
+          >
+            <div className="w-full max-w-md bg-stone-900 border-2 border-amber-500/60 rounded-3xl p-6 sm:p-8 text-center space-y-5 shadow-2xl shadow-amber-500/20 relative overflow-hidden">
+              <div className="w-16 h-16 rounded-2xl bg-amber-500/20 border-2 border-amber-400 flex items-center justify-center text-3xl mx-auto shadow-lg shadow-amber-500/30 animate-bounce">
+                🏆
+              </div>
+
+              <div className="space-y-1">
+                <span className="text-xs uppercase font-extrabold tracking-widest text-amber-400">
+                  ¡Fin de la Dinámica!
+                </span>
+                <h3 className="text-2xl font-black text-white font-cinzel">
+                  ¡Gran Final y Premiación!
+                </h3>
+                <p className="text-xs sm:text-sm text-stone-300">
+                  El profesor ha finalizado la competencia. Observa la pantalla principal o el proyector del aula para conocer el podio de campeones.
+                </p>
+              </div>
+
+              <div className="p-4 rounded-2xl bg-stone-950 border border-stone-800 text-left space-y-2">
+                <div className="flex justify-between text-xs text-stone-400">
+                  <span>Participante:</span>
+                  <span className="text-stone-200 font-bold">{activeStudentRoom?.playerName}</span>
+                </div>
+                <div className="flex justify-between text-xs text-stone-400">
+                  <span>Rondas completadas:</span>
+                  <span className="text-amber-400 font-bold font-mono">
+                    {studentProgress.completedRounds} de {classroomConfig.roundsCount}
+                  </span>
+                </div>
+              </div>
+
+              <div className="pt-2">
+                <p className="text-xs text-stone-400">
+                  ¡Gran esfuerzo en esta dinámica de reducción numérica!
+                </p>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Modal QR para Proyección rápida */}
         {isQrModalOpen && (
