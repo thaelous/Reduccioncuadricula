@@ -33,12 +33,16 @@ import { StudentFinishedModal } from './components/StudentFinishedModal';
 import { StudentWaitingRoom, RoomSyncConfig } from './components/StudentWaitingRoom';
 import { ErrorBoundary } from './components/ErrorBoundary';
 import { ActiveSessionBar } from './components/ActiveSessionBar';
+import { AuthModal } from './components/AuthModal';
+import { DeviceBlockedModal } from './components/DeviceBlockedModal';
 import {
   getStoredSession,
   logoutSession,
   subscribeToAuthState,
   AuthSessionData,
   getFirebaseRtdb,
+  verifyActiveDeviceSession,
+  BLOCKED_DEVICE_MESSAGE,
 } from './services/firebaseAuth';
 import { ref, set, update, onValue, off, serverTimestamp } from 'firebase/database';
 import { GraduationCap, X, Maximize, Minimize } from 'lucide-react';
@@ -77,12 +81,42 @@ export default function App() {
     return getStoredSession();
   });
 
-  // Escuchar cambios de sesión en Firebase
+  // Estados para modal de autenticación y bloqueo de dispositivo físico
+  const [isAuthModalOpen, setIsAuthModalOpen] = useState(false);
+  const [isDeviceBlocked, setIsDeviceBlocked] = useState(false);
+  const [deviceBlockedMessage, setDeviceBlockedMessage] = useState(BLOCKED_DEVICE_MESSAGE);
+
+  // Escuchar cambios de sesión en Firebase y validar restricción de dispositivo único
   useEffect(() => {
     if (isStudentFromUrl) return;
+
+    // Validación inicial si hay sesión previa guardada en este navegador
+    if (sessionData) {
+      verifyActiveDeviceSession(sessionData).then((res) => {
+        if (res.deviceBlocked) {
+          setIsDeviceBlocked(true);
+          setDeviceBlockedMessage(res.message || BLOCKED_DEVICE_MESSAGE);
+          setSessionData(null);
+          setIsTeacherDashboardOpen(false);
+        }
+      });
+    }
+
     const unsubscribe = subscribeToAuthState((firebaseUser) => {
       if (firebaseUser) {
-        setSessionData(getStoredSession());
+        const stored = getStoredSession();
+        if (stored) {
+          verifyActiveDeviceSession(stored).then((res) => {
+            if (res.deviceBlocked) {
+              setIsDeviceBlocked(true);
+              setDeviceBlockedMessage(res.message || BLOCKED_DEVICE_MESSAGE);
+              setSessionData(null);
+              setIsTeacherDashboardOpen(false);
+            } else {
+              setSessionData(stored);
+            }
+          });
+        }
       }
     });
     return () => unsubscribe();
@@ -91,6 +125,8 @@ export default function App() {
   const handleLogout = async () => {
     await logoutSession();
     setSessionData(null);
+    setIsTeacherDashboardOpen(false);
+    setShowSplash(true);
   };
 
   // 2. User Role State: 'teacher' | 'student' | 'projector'
@@ -752,7 +788,20 @@ export default function App() {
     if (showSplash) {
       return (
         <SplashIntro
-          onStartTeacher={() => {
+          onStartTeacher={async () => {
+            if (!sessionData) {
+              setIsAuthModalOpen(true);
+              return;
+            }
+            // Validación estricta de dispositivo al intentar ingresar al panel docente
+            const check = await verifyActiveDeviceSession(sessionData);
+            if (check.deviceBlocked) {
+              setIsDeviceBlocked(true);
+              setDeviceBlockedMessage(check.message || BLOCKED_DEVICE_MESSAGE);
+              setSessionData(null);
+              setIsTeacherDashboardOpen(false);
+              return;
+            }
             setShowSplash(false);
             setUserRole('teacher');
             setIsTeacherDashboardOpen(true);
@@ -1156,6 +1205,38 @@ export default function App() {
           </ErrorBoundary>
         </div>
       </div>
+
+      {/* Modal de Validación / Registro y Canje de Licencia para Docente */}
+      {isAuthModalOpen && (
+        <AuthModal
+          onSuccess={(newSession) => {
+            setSessionData(newSession);
+            setIsAuthModalOpen(false);
+            setShowSplash(false);
+            setUserRole('teacher');
+            setIsTeacherDashboardOpen(true);
+          }}
+          onClose={() => setIsAuthModalOpen(false)}
+          onDeviceBlocked={(msg) => {
+            setIsAuthModalOpen(false);
+            setIsDeviceBlocked(true);
+            setDeviceBlockedMessage(msg || BLOCKED_DEVICE_MESSAGE);
+          }}
+        />
+      )}
+
+      {/* Modal de Bloqueo por Restricción de Dispositivo Físico */}
+      {isDeviceBlocked && (
+        <DeviceBlockedModal
+          message={deviceBlockedMessage}
+          onClose={() => {
+            setIsDeviceBlocked(false);
+            setSessionData(null);
+            setShowSplash(true);
+            setIsTeacherDashboardOpen(false);
+          }}
+        />
+      )}
     </div>
   );
 }

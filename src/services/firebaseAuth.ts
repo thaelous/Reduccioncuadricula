@@ -10,12 +10,48 @@ import {
   getFirestore,
   doc,
   getDoc,
+  setDoc,
+  updateDoc,
   collection,
   query,
   where,
   getDocs,
 } from 'firebase/firestore';
 import { getDatabase, Database } from 'firebase/database';
+
+// Clave de almacenamiento local para la huella de dispositivo único
+export const DEVICE_ID_STORAGE_KEY = 'app_device_id';
+
+// Mensaje obligatorio de acceso denegado por dispositivo duplicado
+export const BLOCKED_DEVICE_MESSAGE =
+  'Acceso restringido: Esta licencia ya está vinculada a otro dispositivo. No está permitido iniciar sesión en múltiples equipos.';
+
+/**
+ * 1. Generación de Huella de Dispositivo (Device ID):
+ * Obtiene o genera un identificador único persistente para el dispositivo actual.
+ * Comprueba si existe localStorage.getItem('app_device_id'). Si no existe, genera
+ * un UUID aleatorio único y lo guarda permanentemente en localStorage.
+ */
+export function getOrCreateDeviceId(): string {
+  try {
+    let deviceId = localStorage.getItem(DEVICE_ID_STORAGE_KEY);
+    if (!deviceId || deviceId.trim().length === 0) {
+      if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+        deviceId = crypto.randomUUID();
+      } else {
+        deviceId =
+          'dev_' +
+          Math.random().toString(36).substring(2, 12) +
+          Date.now().toString(36);
+      }
+      localStorage.setItem(DEVICE_ID_STORAGE_KEY, deviceId);
+    }
+    return deviceId.trim();
+  } catch (err) {
+    console.warn('Error accediendo a localStorage para app_device_id:', err);
+    return 'fallback_device_' + Date.now();
+  }
+}
 
 // Obtiene la clave de API desde variables de entorno Vite o mediante decodificación en tiempo de ejecución
 // para evitar que los escáneres estáticos de secretos en CI/CD (Netlify) cancelen el despliegue
@@ -121,10 +157,12 @@ export async function logoutSession(): Promise<void> {
 
 /**
  * Valida un código de activación en la colección 'suscripciones' de Firestore
+ * y valida la huella de dispositivo físico único.
  */
 export async function validateLicenseCode(rawCode: string): Promise<{
   success: boolean;
   message?: string;
+  deviceBlocked?: boolean;
   session?: AuthSessionData;
 }> {
   // Convertir automáticamente a mayúsculas y quitar espacios en blanco accidentales
@@ -138,12 +176,37 @@ export async function validateLicenseCode(rawCode: string): Promise<{
   }
 
   try {
+    const currentDeviceId = getOrCreateDeviceId();
     const docRef = doc(db, 'suscripciones', cleanCode);
     const docSnap = await getDoc(docRef);
 
     if (docSnap.exists()) {
       const data = docSnap.data();
       if (data && data.activo === true) {
+        // Validación de Huella de Dispositivo Físico
+        const linkedDevice = data.dispositivoVinculado || data.deviceIdAutorizado;
+        if (linkedDevice && linkedDevice !== currentDeviceId) {
+          return {
+            success: false,
+            deviceBlocked: true,
+            message: BLOCKED_DEVICE_MESSAGE,
+          };
+        }
+
+        // Si no tenía dispositivo vinculado aún, vincular al dispositivo físico actual
+        if (!linkedDevice) {
+          try {
+            await updateDoc(docRef, {
+              dispositivoVinculado: currentDeviceId,
+              deviceIdAutorizado: currentDeviceId,
+              fechaVinculacionDispositivo: new Date().toISOString(),
+            });
+            data.dispositivoVinculado = currentDeviceId;
+          } catch (updateErr) {
+            console.warn('No se pudo guardar dispositivoVinculado en suscripción:', updateErr);
+          }
+        }
+
         const session: AuthSessionData = {
           type: 'code',
           identifier: cleanCode,
@@ -175,7 +238,114 @@ export async function validateLicenseCode(rawCode: string): Promise<{
 }
 
 /**
- * Inicia sesión con Correo y Contraseña en Firebase Auth y verifica vigencia en Firestore
+ * 2. Vinculación al Activar/Canjear Licencia:
+ * Registra al usuario y amarra estrictamente la licencia al dispositivo físico actual
+ * (campo dispositivoVinculado: deviceId) en 'suscripciones' y 'usuarios'.
+ */
+export async function redeemLicenseAndRegisterUser(
+  rawCode: string,
+  rawEmail: string,
+  passwordInput: string
+): Promise<{
+  success: boolean;
+  message?: string;
+  deviceBlocked?: boolean;
+  session?: AuthSessionData;
+}> {
+  const sanitizedCode = (rawCode || '').replace(/\s+/g, '').toUpperCase();
+  const cleanEmail = (rawEmail || '').trim().toLowerCase();
+  const password = passwordInput || '';
+
+  if (!sanitizedCode) {
+    return { success: false, message: 'Ingresa un código de activación válido.' };
+  }
+  if (!cleanEmail || !password) {
+    return { success: false, message: 'Completa el correo y la contraseña para crear tu acceso.' };
+  }
+  if (password.length < 6) {
+    return { success: false, message: 'La contraseña debe tener al menos 6 caracteres.' };
+  }
+
+  const currentDeviceId = getOrCreateDeviceId();
+
+  try {
+    // 1. Verificar el código en 'suscripciones'
+    const subRef = doc(db, 'suscripciones', sanitizedCode);
+    const subSnap = await getDoc(subRef);
+
+    if (!subSnap.exists()) {
+      return { success: false, message: 'El código ingresado no existe en el sistema.' };
+    }
+
+    const subData = subSnap.data();
+
+    if (subData.activo === false || subData.usado === true || (subData.usadoPor && subData.usadoPor.trim() !== '')) {
+      return { success: false, message: 'Este código de activación ya fue utilizado o se encuentra inactivo.' };
+    }
+
+    // Verificar si ya cuenta con dispositivo vinculado previo que difiera
+    const existingDevice = subData.dispositivoVinculado || subData.deviceIdAutorizado;
+    if (existingDevice && existingDevice !== currentDeviceId) {
+      return {
+        success: false,
+        deviceBlocked: true,
+        message: BLOCKED_DEVICE_MESSAGE,
+      };
+    }
+
+    // 2. Verificar si el usuario ya existe en 'usuarios'
+    const userRef = doc(db, 'usuarios', cleanEmail);
+    const userSnap = await getDoc(userRef);
+    if (userSnap.exists()) {
+      return { success: false, message: 'Este correo ya está registrado. Inicia sesión en la pestaña principal.' };
+    }
+
+    // 3. Guardar el registro en la colección 'usuarios' amarrado a este dispositivo
+    await setDoc(userRef, {
+      correo: cleanEmail,
+      email: cleanEmail,
+      password: password,
+      codigoUsado: sanitizedCode,
+      dispositivoVinculado: currentDeviceId,
+      deviceIdAutorizado: currentDeviceId,
+      registradoEl: new Date().toISOString(),
+      rol: 'docente',
+    });
+
+    // 4. Quemar y amarrar el código en 'suscripciones' con dispositivoVinculado
+    await updateDoc(subRef, {
+      usado: true,
+      usadoPor: cleanEmail,
+      dispositivoVinculado: currentDeviceId,
+      deviceIdAutorizado: currentDeviceId,
+      fechaActivacion: new Date().toISOString(),
+      fechaVinculacionDispositivo: new Date().toISOString(),
+    });
+
+    const sessionData: AuthSessionData = {
+      type: 'email',
+      identifier: cleanEmail,
+      activatedAt: Date.now(),
+      data: {
+        ...subData,
+        usadoPor: cleanEmail,
+        dispositivoVinculado: currentDeviceId,
+      },
+    };
+
+    saveSession(sessionData);
+    return { success: true, session: sessionData };
+  } catch (err: unknown) {
+    const error = err as { message?: string };
+    console.error('Error al registrar usuario y canjear licencia:', error);
+    return { success: false, message: error?.message || 'Error al procesar el canje de la licencia.' };
+  }
+}
+
+/**
+ * 3. Validación de Bloqueo en el Inicio de Sesión:
+ * Inicia sesión con Correo y Contraseña, y valida que el dispositivo físico coincida
+ * estrictamente con el 'dispositivoVinculado' en Firestore.
  */
 export async function loginWithEmailAndPassword(
   emailInput: string,
@@ -183,9 +353,10 @@ export async function loginWithEmailAndPassword(
 ): Promise<{
   success: boolean;
   message?: string;
+  deviceBlocked?: boolean;
   session?: AuthSessionData;
 }> {
-  const email = (emailInput || '').trim();
+  const email = (emailInput || '').trim().toLowerCase();
   const password = passwordInput || '';
 
   if (!email || !password) {
@@ -195,72 +366,145 @@ export async function loginWithEmailAndPassword(
     };
   }
 
+  const currentDeviceId = getOrCreateDeviceId();
+
   try {
-    const credential = await signInWithEmailAndPassword(auth, email, password);
-    const user = credential.user;
+    let authUserEmail = email;
+    let authUserUid: string | null = null;
+    let authSuccess = false;
 
-    // Verificar en la colección 'suscripciones' si cuenta con registro activo
-    let isActive = false;
-    let subscriptionData: Record<string, unknown> | undefined = undefined;
-
-    // 1. Intentar consulta por UID
+    // A) Intentar autenticación por Firebase Auth estándar
     try {
-      const uidDoc = await getDoc(doc(db, 'suscripciones', user.uid));
-      if (uidDoc.exists() && uidDoc.data()?.activo === true) {
-        isActive = true;
-        subscriptionData = uidDoc.data();
+      const credential = await signInWithEmailAndPassword(auth, email, password);
+      if (credential.user) {
+        authSuccess = true;
+        authUserUid = credential.user.uid;
+        authUserEmail = credential.user.email?.toLowerCase() || email;
       }
-    } catch (e) {
-      console.warn('Verificación por UID falló:', e);
+    } catch (fbAuthErr: any) {
+      // Si falla Firebase Auth, verificamos si existe registro en colección 'usuarios'
+      console.warn('Firebase Auth estándar falló o no configurado, intentando colección usuarios:', fbAuthErr?.code);
     }
 
-    // 2. Intentar consulta por Email como ID de documento
-    if (!isActive && user.email) {
+    // B) Consultar documento en 'usuarios/{email}' o 'usuarios/{uid}'
+    let userDocData: Record<string, any> | null = null;
+    let userDocRef = doc(db, 'usuarios', authUserEmail);
+    let userSnap = await getDoc(userDocRef);
+
+    if (userSnap.exists()) {
+      userDocData = userSnap.data();
+    } else if (authUserUid) {
+      userDocRef = doc(db, 'usuarios', authUserUid);
+      userSnap = await getDoc(userDocRef);
+      if (userSnap.exists()) {
+        userDocData = userSnap.data();
+      }
+    }
+
+    // Si no autenticó en Firebase Auth, verificar contraseña en 'usuarios'
+    if (!authSuccess) {
+      if (!userSnap.exists() || !userDocData) {
+        return {
+          success: false,
+          message: 'Usuario no registrado. Si tienes una licencia, canjéala en la pestaña "Canjear Licencia".',
+        };
+      }
+
+      if (userDocData.password !== password) {
+        return {
+          success: false,
+          message: 'Correo o contraseña incorrectos.',
+        };
+      }
+    }
+
+    // C) Obtener datos de la suscripción asociada
+    let subscriptionData: Record<string, any> | null = null;
+    const codigoAsociado = userDocData?.codigoUsado;
+
+    if (codigoAsociado) {
       try {
-        const emailDoc = await getDoc(doc(db, 'suscripciones', user.email.toLowerCase().trim()));
-        if (emailDoc.exists() && emailDoc.data()?.activo === true) {
-          isActive = true;
+        const subSnap = await getDoc(doc(db, 'suscripciones', codigoAsociado.toUpperCase()));
+        if (subSnap.exists()) {
+          subscriptionData = subSnap.data();
+        }
+      } catch (e) {
+        console.warn('Error leyendo suscripción por código asociado:', e);
+      }
+    }
+
+    if (!subscriptionData) {
+      try {
+        const emailDoc = await getDoc(doc(db, 'suscripciones', authUserEmail));
+        if (emailDoc.exists()) {
           subscriptionData = emailDoc.data();
         }
       } catch (e) {
-        console.warn('Verificación por ID email falló:', e);
+        console.warn('Error leyendo suscripción por email:', e);
       }
     }
 
-    // 3. Intentar consulta por campo email en la colección
-    if (!isActive && user.email) {
+    if (!subscriptionData) {
       try {
-        const q = query(
-          collection(db, 'suscripciones'),
-          where('email', '==', user.email.toLowerCase().trim())
-        );
-        const querySnapshot = await getDocs(q);
-        const matchingDoc = querySnapshot.docs.find(
-          (d) => d.data()?.activo === true
-        );
-        if (matchingDoc) {
-          isActive = true;
-          subscriptionData = matchingDoc.data();
+        const q = query(collection(db, 'suscripciones'), where('usadoPor', '==', authUserEmail));
+        const qSnap = await getDocs(q);
+        if (!qSnap.empty) {
+          subscriptionData = qSnap.docs[0].data();
         }
       } catch (e) {
-        console.warn('Consulta por campo email falló:', e);
+        console.warn('Error buscando suscripción usadaPor:', e);
       }
     }
 
-    // Si no se encontró registro activo en 'suscripciones'
-    if (!isActive) {
-      await signOut(auth);
+    // D) VALIDACIÓN ESTRICTA DE HUELLA DE DISPOSITIVO (Device ID)
+    const linkedDevice =
+      userDocData?.dispositivoVinculado ||
+      userDocData?.deviceIdAutorizado ||
+      subscriptionData?.dispositivoVinculado ||
+      subscriptionData?.deviceIdAutorizado;
+
+    // Si ya existe un dispositivo físico amarrado y no coincide:
+    if (linkedDevice && linkedDevice !== currentDeviceId) {
+      console.warn(`[Seguridad] Bloqueo: Dispositivo vinculado (${linkedDevice}) vs Actual (${currentDeviceId})`);
+      // Cierra la sesión inmediatamente
+      await logoutSession();
       return {
         success: false,
-        message: 'Acceso denegado: Tu cuenta no tiene una suscripción activa (activo: true) registrada en el sistema.',
+        deviceBlocked: true,
+        message: BLOCKED_DEVICE_MESSAGE,
       };
+    }
+
+    // Si aún no estaba amarrado (primer inicio de sesión), amarrarlo ahora permanentemente
+    if (!linkedDevice) {
+      try {
+        if (userDocRef) {
+          await updateDoc(userDocRef, {
+            dispositivoVinculado: currentDeviceId,
+            deviceIdAutorizado: currentDeviceId,
+            fechaVinculacionDispositivo: new Date().toISOString(),
+          });
+        }
+        if (codigoAsociado) {
+          await updateDoc(doc(db, 'suscripciones', codigoAsociado.toUpperCase()), {
+            dispositivoVinculado: currentDeviceId,
+            deviceIdAutorizado: currentDeviceId,
+          }).catch(() => {});
+        }
+      } catch (bindErr) {
+        console.warn('No se pudo amarrar dispositivo en primer login:', bindErr);
+      }
     }
 
     const session: AuthSessionData = {
       type: 'email',
-      identifier: user.email || user.uid,
+      identifier: authUserEmail,
       activatedAt: Date.now(),
-      data: subscriptionData,
+      data: {
+        ...(userDocData || {}),
+        ...(subscriptionData || {}),
+        dispositivoVinculado: currentDeviceId,
+      },
     };
 
     saveSession(session);
@@ -291,6 +535,85 @@ export async function loginWithEmailAndPassword(
     }
 
     return { success: false, message: friendlyMessage };
+  }
+}
+
+/**
+ * 3. Validación de Bloqueo en la Carga / Verificación de Sesión Activa:
+ * Lee el documento del usuario o licencia en Firestore y comprueba que
+ * el dispositivo físico actual coincida con 'dispositivoVinculado'.
+ * Si no coinciden, cierra sesión inmediatamente y retorna deviceBlocked: true.
+ */
+export async function verifyActiveDeviceSession(
+  currentSession?: AuthSessionData | null
+): Promise<{
+  valid: boolean;
+  deviceBlocked?: boolean;
+  message?: string;
+}> {
+  const session = currentSession || getStoredSession();
+  if (!session) {
+    return { valid: true };
+  }
+
+  const currentDeviceId = getOrCreateDeviceId();
+  const identifier = session.identifier?.trim();
+
+  if (!identifier) {
+    return { valid: true };
+  }
+
+  try {
+    let linkedDevice: string | null = null;
+
+    if (session.type === 'code') {
+      // Consulta en suscripciones
+      const subRef = doc(db, 'suscripciones', identifier.toUpperCase());
+      const subSnap = await getDoc(subRef);
+      if (subSnap.exists()) {
+        const d = subSnap.data();
+        linkedDevice = d?.dispositivoVinculado || d?.deviceIdAutorizado || null;
+      }
+    } else {
+      // Consulta en usuarios
+      const cleanEmail = identifier.toLowerCase();
+      const userRef = doc(db, 'usuarios', cleanEmail);
+      const userSnap = await getDoc(userRef);
+      if (userSnap.exists()) {
+        const u = userSnap.data();
+        linkedDevice = u?.dispositivoVinculado || u?.deviceIdAutorizado || null;
+      }
+
+      // Consulta de respaldo en suscripciones
+      if (!linkedDevice) {
+        try {
+          const q = query(collection(db, 'suscripciones'), where('usadoPor', '==', cleanEmail));
+          const snap = await getDocs(q);
+          if (!snap.empty) {
+            const first = snap.docs[0].data();
+            linkedDevice = first?.dispositivoVinculado || first?.deviceIdAutorizado || null;
+          }
+        } catch (e) {
+          // Ignorar fallo secundario
+        }
+      }
+    }
+
+    // SI NO COINCIDEN:
+    if (linkedDevice && linkedDevice !== currentDeviceId) {
+      console.warn(`[Seguridad] Sesión cerrada: dispositivo ${linkedDevice} no coincide con este equipo (${currentDeviceId})`);
+      await logoutSession();
+      return {
+        valid: false,
+        deviceBlocked: true,
+        message: BLOCKED_DEVICE_MESSAGE,
+      };
+    }
+
+    return { valid: true };
+  } catch (err) {
+    console.warn('Error verificando dispositivo en Firestore (modo offline/transitorio):', err);
+    return { valid: true };
   }
 }
 

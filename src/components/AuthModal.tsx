@@ -9,16 +9,30 @@ import {
   Sparkles,
   Calendar,
   CheckCircle2,
-  ArrowRight
+  ArrowRight,
+  X
 } from 'lucide-react';
-import { doc, getDoc, setDoc, updateDoc } from 'firebase/firestore';
-import { db, AuthSessionData } from '../services/firebaseAuth';
+import { doc, getDoc } from 'firebase/firestore';
+import {
+  db,
+  AuthSessionData,
+  getOrCreateDeviceId,
+  redeemLicenseAndRegisterUser,
+  loginWithEmailAndPassword,
+  BLOCKED_DEVICE_MESSAGE,
+} from '../services/firebaseAuth';
 
 interface AuthModalProps {
   onSuccess: (session: AuthSessionData) => void;
+  onClose?: () => void;
+  onDeviceBlocked?: (message: string) => void;
 }
 
-export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
+export const AuthModal: React.FC<AuthModalProps> = ({
+  onSuccess,
+  onClose,
+  onDeviceBlocked,
+}) => {
   const [activeTab, setActiveTab] = useState<'login' | 'redeem'>('login');
 
   // Estado del flujo de canje
@@ -39,20 +53,10 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
   const [isLoading, setIsLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  // Obtener o generar deviceId
-  const getDeviceId = () => {
-    let deviceId = localStorage.getItem('app_device_id');
-    if (!deviceId) {
-      deviceId = 'dev_' + Math.random().toString(36).substring(2, 12) + Date.now().toString(36);
-      localStorage.setItem('app_device_id', deviceId);
-    }
-    return deviceId;
-  };
-
   // PASO 1: Validar el código sin quemarlo todavía
   const handleVerifyCode = async (e: React.FormEvent) => {
     e.preventDefault();
-    const sanitized = licenseCode.trim().toUpperCase();
+    const sanitized = licenseCode.replace(/\s+/g, '').toUpperCase();
     if (!sanitized) {
       setErrorMessage('Por favor, ingresa tu código de activación.');
       return;
@@ -62,6 +66,7 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
     setErrorMessage(null);
 
     try {
+      const currentDeviceId = getOrCreateDeviceId();
       const docRef = doc(db, 'suscripciones', sanitized);
       const docSnap = await getDoc(docRef);
 
@@ -72,6 +77,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
       }
 
       const data = docSnap.data();
+
+      // Verificar si ya fue utilizado o si está amarrado a otro dispositivo
+      const linkedDevice = data.dispositivoVinculado || data.deviceIdAutorizado;
+      if (linkedDevice && linkedDevice !== currentDeviceId) {
+        setErrorMessage(BLOCKED_DEVICE_MESSAGE);
+        if (onDeviceBlocked) {
+          onDeviceBlocked(BLOCKED_DEVICE_MESSAGE);
+        }
+        setIsLoading(false);
+        return;
+      }
 
       // Verificar si ya fue utilizado
       if (data.activo === false || data.usado === true || (data.usadoPor && data.usadoPor.trim() !== '')) {
@@ -101,115 +117,46 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
     }
   };
 
-  // PASO 2: Registrar usuario, quemar código e iniciar sesión
+  // PASO 2: Registrar usuario, amarrar a este dispositivo físico y quemar código
   const handleRegisterAndActivate = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanEmail = regEmail.trim().toLowerCase();
-
-    if (!cleanEmail || !regPassword) {
-      setErrorMessage('Completa el correo y la contraseña para crear tu acceso.');
-      return;
-    }
-
-    if (regPassword.length < 6) {
-      setErrorMessage('La contraseña debe tener al menos 6 caracteres.');
-      return;
-    }
-
     setIsLoading(true);
     setErrorMessage(null);
 
-    try {
-      const userRef = doc(db, 'usuarios', cleanEmail);
-      const userSnap = await getDoc(userRef);
+    const result = await redeemLicenseAndRegisterUser(
+      licenseCode,
+      regEmail,
+      regPassword
+    );
 
-      if (userSnap.exists()) {
-        setErrorMessage('Este correo ya está registrado. Inicia sesión en la pestaña principal.');
-        setIsLoading(false);
-        return;
+    if (result.success && result.session) {
+      onSuccess(result.session);
+    } else {
+      setErrorMessage(result.message || 'Error al registrar el acceso.');
+      if (result.deviceBlocked && onDeviceBlocked) {
+        onDeviceBlocked(result.message || BLOCKED_DEVICE_MESSAGE);
       }
-
-      const deviceId = getDeviceId();
-      const sanitizedCode = licenseCode.replace(/\s+/g, '').toUpperCase();
-
-      // Guardar el registro en la colección usuarios
-      await setDoc(userRef, {
-        correo: cleanEmail,
-        password: regPassword,
-        codigoUsado: sanitizedCode,
-        deviceIdAutorizado: deviceId,
-        registradoEl: new Date().toISOString()
-      });
-
-      // Quemar el código en suscripciones
-      const subRef = doc(db, 'suscripciones', sanitizedCode);
-      await updateDoc(subRef, {
-        usado: true,
-        usadoPor: cleanEmail,
-        fechaActivacion: new Date().toISOString()
-      });
-
-      const sessionData: AuthSessionData = {
-        type: 'email',
-        identifier: cleanEmail,
-        activatedAt: Date.now()
-      };
-
-      localStorage.setItem('auth_token_reduccion', JSON.stringify(sessionData));
-      onSuccess(sessionData);
-    } catch (err: any) {
-      console.error(err);
-      setErrorMessage(err.message || 'Error al registrar el acceso.');
-    } finally {
-      setIsLoading(false);
     }
+    setIsLoading(false);
   };
 
-  // INICIO DE SESIÓN HABITUAL (Correo y contraseña)
+  // INICIO DE SESIÓN HABITUAL (Correo y contraseña con validación estricta de dispositivo)
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
-    const cleanEmail = loginEmail.trim().toLowerCase();
-
-    if (!cleanEmail || !loginPassword) {
-      setErrorMessage('Ingresa tu correo y contraseña.');
-      return;
-    }
-
     setIsLoading(true);
     setErrorMessage(null);
 
-    try {
-      const userRef = doc(db, 'usuarios', cleanEmail);
-      const userSnap = await getDoc(userRef);
+    const result = await loginWithEmailAndPassword(loginEmail, loginPassword);
 
-      if (!userSnap.exists()) {
-        setErrorMessage('Usuario no registrado. Si tienes una licencia, canjéala en la otra pestaña.');
-        setIsLoading(false);
-        return;
+    if (result.success && result.session) {
+      onSuccess(result.session);
+    } else {
+      setErrorMessage(result.message || 'Error de autenticación.');
+      if (result.deviceBlocked && onDeviceBlocked) {
+        onDeviceBlocked(result.message || BLOCKED_DEVICE_MESSAGE);
       }
-
-      const userData = userSnap.data();
-
-      if (userData.password !== loginPassword) {
-        setErrorMessage('Contraseña incorrecta.');
-        setIsLoading(false);
-        return;
-      }
-
-      const sessionData: AuthSessionData = {
-        type: 'email',
-        identifier: cleanEmail,
-        activatedAt: Date.now()
-      };
-
-      localStorage.setItem('auth_token_reduccion', JSON.stringify(sessionData));
-      onSuccess(sessionData);
-    } catch (err: any) {
-      console.error(err);
-      setErrorMessage(err.message || 'Error de autenticación.');
-    } finally {
-      setIsLoading(false);
     }
+    setIsLoading(false);
   };
 
   return (
@@ -223,6 +170,17 @@ export const AuthModal: React.FC<AuthModalProps> = ({ onSuccess }) => {
         style={{ backgroundColor: '#1e293b' }}
         className="w-full max-w-md rounded-2xl sm:rounded-3xl border border-[#334155] shadow-2xl p-6 sm:p-8 flex flex-col items-center text-center relative overflow-hidden transition-all"
       >
+        {onClose && (
+          <button
+            type="button"
+            onClick={onClose}
+            className="absolute top-4 right-4 p-2 rounded-xl text-slate-400 hover:text-white hover:bg-slate-800 transition-all cursor-pointer"
+            title="Cerrar modal"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        )}
+
         <div className="absolute -top-20 left-1/2 -translate-x-1/2 w-64 h-64 bg-sky-500/10 rounded-full blur-3xl pointer-events-none" />
 
         <div className="w-14 h-14 rounded-2xl bg-sky-500/15 border border-sky-400/30 flex items-center justify-center text-[#38bdf8] mb-4 shadow-inner">
