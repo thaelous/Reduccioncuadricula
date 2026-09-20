@@ -1,28 +1,29 @@
-import React, { useState, useEffect, useRef } from 'react';
+/**
+ * @license
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import QRCode from 'qrcode';
 import {
-  Settings,
-  Grid,
-  QrCode,
-  Tv,
-  Play,
   Copy,
   Check,
-  RotateCcw,
-  Sparkles,
-  Layers,
-  Clock,
+  Tv,
   Maximize2,
   X,
-  ExternalLink,
-  HelpCircle,
   GraduationCap,
-  Hash,
   Loader2,
   Users,
   CheckCircle2,
+  Sliders,
+  UserCheck,
+  XCircle,
+  Trophy,
+  Play,
+  Clock,
+  Zap,
 } from 'lucide-react';
-import { ref, set, onValue, off, serverTimestamp } from 'firebase/database';
+import { ref, set, update, onValue, off, serverTimestamp } from 'firebase/database';
 import { ClassroomConfig } from '../types';
 import { getFirebaseRtdb } from '../services/firebaseAuth';
 
@@ -36,12 +37,24 @@ interface TeacherDashboardProps {
   onBackToApp: () => void;
 }
 
-interface ConnectedPlayer {
+export interface PlayerRoundData {
+  tiempo?: number;
+  completada?: boolean;
+  esCorrecto?: boolean | null;
+  fecha?: number;
+}
+
+export interface ConnectedPlayer {
   id: string;
   name: string;
-  status: 'thinking' | 'finished' | 'joined';
-  currentRound?: number;
+  status: string;
+  currentRound: number;
   isFinished?: boolean;
+  time?: number;
+  isCorrect?: boolean | null;
+  connected?: boolean;
+  rondas?: Record<number, PlayerRoundData>;
+  totalTime?: number;
 }
 
 export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
@@ -53,55 +66,54 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
   onLaunchStudentView,
   onBackToApp,
 }) => {
-  const [stage, setStage] = useState<2 | 3>(2);
-  const [currentRound, setCurrentRound] = useState<number>(1);
-  const [qrDataUrl, setQrDataUrl] = useState<string>('');
-  const [copiedUrl, setCopiedUrl] = useState(false);
-  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [connectedPlayers, setConnectedPlayers] = useState<ConnectedPlayer[]>([]);
-  const [roomCode, setRoomCode] = useState<string>(() =>
-    Math.floor(1000 + Math.random() * 9000).toString()
+  // Etapas del Flujo del Profesor:
+  // 1 = Configuración previa (3x3, 4x4, 5x5, tiempo, modo)
+  // 2 = Lobby QR y Participantes en Vivo
+  // 3 = Monitor de Progreso en Tiempo Real por Rondas
+  const [stage, setStage] = useState<1 | 2 | 3>(1);
+
+  // Parámetros de la sala
+  const [selectedSize, setSelectedSize] = useState<number>(config.rows || 4);
+  const [selectedMode, setSelectedMode] = useState<'reduccion' | 'tradicional' | 'libre'>(
+    config.studentMode || 'reduccion'
   );
+  const [selectedTimeLimit, setSelectedTimeLimit] = useState<number>(config.timeLimitSeconds || 0);
+  const [selectedRounds, setSelectedRounds] = useState<number>(config.roundsCount || 5);
 
-  const mountedRef = useRef(false);
+  // Código de sala (numérico de 4 dígitos, ej. 8520)
+  const [roomCode, setRoomCode] = useState<string>(() => {
+    return Math.floor(1000 + Math.random() * 9000).toString();
+  });
 
-  // Compute the direct student URL
-  const studentUrl = React.useMemo(() => {
-    try {
-      const origin = typeof window !== 'undefined' ? window.location.origin : '';
-      const pathname = typeof window !== 'undefined' ? (window.location.pathname || '/') : '/';
-      const params = new URLSearchParams();
-      params.set('role', 'alumno');
-      params.set('sala', roomCode);
-      if (config) {
-        params.set('m', config.studentMode || 'reduccion');
-        params.set('r', String(config.rows || 4));
-        params.set('c', String(config.cols || 4));
-        if (config.roundsCount > 0) {
-          params.set('rounds', String(config.roundsCount));
-        }
-        if (config.timeLimitSeconds > 0) {
-          params.set('limit', String(config.timeLimitSeconds));
-        }
-      }
-      params.set('seed', String(currentSeed || 100000));
-      return `${origin}${pathname}?${params.toString()}`;
-    } catch {
-      return '';
-    }
-  }, [config, currentSeed, roomCode]);
+  // Lista en tiempo real de participantes
+  const [connectedPlayers, setConnectedPlayers] = useState<ConnectedPlayer[]>([]);
+  const [isConnecting, setIsConnecting] = useState<boolean>(false);
 
-  // Generar código QR de forma asíncrona y segura cuando el componente está montado
+  // QR Code Data URI y copiado
+  const [qrDataUrl, setQrDataUrl] = useState<string>('');
+  const [isQrModalOpen, setIsQrModalOpen] = useState<boolean>(false);
+  const [copiedUrl, setCopiedUrl] = useState<boolean>(false);
+
+  const mountedRef = useRef(true);
+
+  // URL para el alumno al escanear el QR o unirse
+  const studentUrl = useMemo(() => {
+    if (typeof window === 'undefined') return '';
+    const origin = window.location.origin;
+    const pathname = window.location.pathname || '/';
+    return `${origin}${pathname}?sala=${roomCode}&role=alumno`;
+  }, [roomCode]);
+
+  // Generar QR para el Lobby
   useEffect(() => {
-    let isCurrent = true;
     if (!studentUrl) return;
+    let isCurrent = true;
 
     QRCode.toDataURL(studentUrl, {
       width: 400,
-      margin: 1.5,
+      margin: 1,
       color: {
-        dark: '#000000',
+        dark: '#0a0a0a',
         light: '#ffffff',
       },
     })
@@ -117,10 +129,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     };
   }, [studentUrl]);
 
-  // Conexión y sincronización con Firebase Realtime Database
-  // Se ejecuta estricta y únicamente cuando el componente está montado
+  // Sincronización en tiempo real con Firebase RTDB para Etapas 2 y 3
   useEffect(() => {
     mountedRef.current = true;
+    if (stage === 1) return; // En la etapa 1 no sincronizamos hasta confirmar la configuración
+
     let isCurrent = true;
     setIsConnecting(true);
 
@@ -134,36 +147,42 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         return;
       }
 
-      activeRoomRef = ref(rtdb, `rooms/${roomCode}`);
-      activePlayersRef = ref(rtdb, `rooms/${roomCode}/players`);
+      activeRoomRef = ref(rtdb, `salas/${roomCode}`);
+      activePlayersRef = ref(rtdb, `salas/${roomCode}/jugadores`);
 
       // Registrar o sincronizar la sala en Firebase RTDB
-      set(activeRoomRef, {
+      const roomPayload = {
+        codigo: roomCode,
         config: {
-          mode: config?.studentMode || 'reduccion',
-          rows: config?.rows || 4,
-          cols: config?.cols || 4,
-          rounds: config?.roundsCount || 5,
-          limit: config?.timeLimitSeconds || 0,
+          filas: selectedSize,
+          columnas: selectedSize,
+          rows: selectedSize,
+          cols: selectedSize,
+          modo: selectedMode,
+          mode: selectedMode,
+          limiteTiempo: selectedTimeLimit,
+          limit: selectedTimeLimit,
+          rondas: selectedRounds,
+          rounds: selectedRounds,
+          semilla: currentSeed,
           seed: currentSeed,
         },
+        estado: stage === 3 ? 'jugando' : 'esperando',
         status: stage === 3 ? 'playing' : 'waiting',
-        currentRound: currentRound,
-        updatedAt: serverTimestamp(),
-      })
+        rondaActual: 1,
+        actualizadoEn: serverTimestamp(),
+      };
+
+      set(activeRoomRef, roomPayload)
         .then(() => {
-          if (isCurrent) {
-            setIsConnecting(false);
-          }
+          if (isCurrent) setIsConnecting(false);
         })
         .catch((err) => {
-          console.warn('Aviso conectando sala en Firebase RTDB:', err);
-          if (isCurrent) {
-            setIsConnecting(false);
-          }
+          console.warn('Aviso registrando sala en Firebase RTDB:', err);
+          if (isCurrent) setIsConnecting(false);
         });
 
-      // Escuchar participantes en tiempo real
+      // Escuchar participantes conectados en tiempo real en salas/{idSala}/jugadores
       onValue(
         activePlayersRef,
         (snapshot) => {
@@ -171,13 +190,73 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           if (snapshot.exists()) {
             const data = snapshot.val();
             const playersList: ConnectedPlayer[] = Object.entries(data).map(
-              ([id, val]: [string, any]) => ({
-                id,
-                name: val?.name || `Alumno ${id.slice(-4)}`,
-                status: val?.isFinished ? 'finished' : (val?.status || 'thinking'),
-                currentRound: val?.currentRound || 1,
-                isFinished: !!val?.isFinished,
-              })
+              ([id, val]: [string, any]) => {
+                // Normalizar rondas registradas por el alumno
+                const rawRondas = val?.rondas || {};
+                const parsedRondas: Record<number, PlayerRoundData> = {};
+                let totalTime = 0;
+
+                if (typeof rawRondas === 'object' && rawRondas !== null) {
+                  Object.entries(rawRondas).forEach(([rNum, rData]: [string, any]) => {
+                    const roundIndex = parseInt(rNum, 10);
+                    if (!isNaN(roundIndex) && rData) {
+                      const roundTime =
+                        typeof rData.tiempo === 'number'
+                          ? rData.tiempo
+                          : typeof rData.time === 'number'
+                          ? rData.time
+                          : undefined;
+                      if (roundTime !== undefined) totalTime += roundTime;
+                      parsedRondas[roundIndex] = {
+                        tiempo: roundTime,
+                        completada:
+                          rData.completada === true ||
+                          rData.completed === true ||
+                          rData.esCorrecto === true,
+                        esCorrecto: rData.esCorrecto !== undefined ? rData.esCorrecto : true,
+                        fecha: rData.fecha,
+                      };
+                    }
+                  });
+                }
+
+                // Si aún no tenía mapa de rondas pero tenía tiempo registrado para la ronda 1
+                if (Object.keys(parsedRondas).length === 0 && val?.tiempo !== undefined) {
+                  parsedRondas[1] = {
+                    tiempo: val.tiempo,
+                    completada: val?.estado === 'terminado' || val?.isFinished === true,
+                    esCorrecto: val?.esCorrecto,
+                  };
+                  totalTime += val.tiempo;
+                }
+
+                const currentRound = val?.rondaActual || val?.ronda || val?.currentRound || 1;
+                const isFinished =
+                  val?.estado === 'terminado' ||
+                  val?.isFinished === true ||
+                  val?.status === 'finished' ||
+                  (selectedRounds > 0 && currentRound > selectedRounds);
+
+                // Nombre real ingresado por el alumno al registrarse
+                const realName =
+                  (typeof val?.nombre === 'string' && val.nombre.trim()) ||
+                  (typeof val?.name === 'string' && val.name.trim()) ||
+                  (typeof val?.alias === 'string' && val.alias.trim()) ||
+                  'Participante';
+
+                return {
+                  id,
+                  name: realName,
+                  status: isFinished ? 'terminado' : val?.estado || val?.status || 'jugando',
+                  currentRound,
+                  isFinished,
+                  time: val?.tiempo,
+                  isCorrect: val?.esCorrecto,
+                  connected: val?.conectado !== false,
+                  rondas: parsedRondas,
+                  totalTime: totalTime > 0 ? +totalTime.toFixed(1) : undefined,
+                };
+              }
             );
             setConnectedPlayers(playersList);
           } else {
@@ -185,11 +264,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           }
         },
         (error) => {
-          console.warn('Aviso escuchando jugadores:', error);
+          console.warn('Aviso escuchando jugadores en tiempo real:', error);
         }
       );
     } catch (e) {
-      console.warn('Error en inicialización RTDB:', e);
+      console.warn('Error en RTDB:', e);
       if (isCurrent) setIsConnecting(false);
     }
 
@@ -204,20 +283,17 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
         }
       }
     };
-  }, [roomCode, currentSeed, config, stage, currentRound]);
+  }, [stage, roomCode, selectedSize, selectedMode, selectedTimeLimit, selectedRounds, currentSeed]);
 
-  const handleCopyLink = async () => {
-    try {
-      if (!studentUrl) return;
-      await navigator.clipboard.writeText(studentUrl);
-      setCopiedUrl(true);
-      setTimeout(() => setCopiedUrl(false), 2200);
-    } catch (e) {
-      console.warn('Clipboard error:', e);
-    }
-  };
-
-  const handleCreateRoom = () => {
+  // Acción: Confirmar configuración y pasar al Lobby QR (Etapa 1 -> Etapa 2)
+  const handleConfirmConfigAndCreateRoom = () => {
+    onUpdateConfig({
+      rows: selectedSize,
+      cols: selectedSize,
+      studentMode: selectedMode,
+      timeLimitSeconds: selectedTimeLimit,
+      roundsCount: selectedRounds,
+    });
     onRegenerateSeed();
     const newCode = Math.floor(1000 + Math.random() * 9000).toString();
     setRoomCode(newCode);
@@ -225,46 +301,90 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     setStage(2);
   };
 
-  const handleStartGame = () => {
-    setCurrentRound(1);
+  // Copiar enlace al portapapeles
+  const handleCopyLink = () => {
+    if (!studentUrl) return;
+    try {
+      navigator.clipboard.writeText(studentUrl);
+      setCopiedUrl(true);
+      setTimeout(() => setCopiedUrl(false), 2500);
+    } catch {
+      // Fallback manual
+      const ta = document.createElement('textarea');
+      ta.value = studentUrl;
+      document.body.appendChild(ta);
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+      setCopiedUrl(true);
+      setTimeout(() => setCopiedUrl(false), 2500);
+    }
+  };
+
+  // Acción: Iniciar Dinámica (Etapa 2 -> Etapa 3)
+  const handleStartDynamic = () => {
     setStage(3);
+
     try {
       const rtdb = getFirebaseRtdb();
       if (rtdb && roomCode) {
-        set(ref(rtdb, `rooms/${roomCode}/status`), 'playing').catch(() => {});
-        set(ref(rtdb, `rooms/${roomCode}/currentRound`), 1).catch(() => {});
+        // Actualizar estado de la sala a 'jugando' para desbloquear a los alumnos
+        update(ref(rtdb, `salas/${roomCode}`), {
+          estado: 'jugando',
+          status: 'playing',
+          rondaActual: 1,
+          iniciadoEn: serverTimestamp(),
+        }).catch((err) => console.warn('Error iniciando sala:', err));
+
+        // Poner a todos los jugadores en estado 'jugando' en ronda 1
+        if (connectedPlayers.length > 0) {
+          connectedPlayers.forEach((p) => {
+            update(ref(rtdb, `salas/${roomCode}/jugadores/${p.id}`), {
+              estado: 'jugando',
+              status: 'playing',
+              isFinished: false,
+              rondaActual: 1,
+            }).catch(() => {});
+          });
+        }
       }
     } catch (e) {
-      console.warn('Error actualizando estado a playing:', e);
+      console.warn('Error al iniciar dinámica en RTDB:', e);
     }
   };
 
-  const handleNextRound = () => {
-    const total = (config?.roundsCount && config.roundsCount > 0) ? config.roundsCount : 5;
-    if (currentRound < total) {
-      const nextRoundNum = currentRound + 1;
-      setCurrentRound(nextRoundNum);
-      onRegenerateSeed();
-      try {
-        const rtdb = getFirebaseRtdb();
-        if (rtdb && roomCode) {
-          set(ref(rtdb, `rooms/${roomCode}/currentRound`), nextRoundNum).catch(() => {});
-        }
-      } catch (e) {
-        console.warn('Error actualizando ronda en RTDB:', e);
+  // Acción: Finalizar Dinámica y Retorno Limpio a la Configuración Inicial
+  const handleEndDynamic = async () => {
+    const confirmEnd = window.confirm(
+      '¿Deseas finalizar la dinámica actual para todos los participantes y regresar a la configuración inicial?'
+    );
+    if (!confirmEnd) return;
+
+    try {
+      const rtdb = getFirebaseRtdb();
+      if (rtdb && roomCode) {
+        await update(ref(rtdb, `salas/${roomCode}`), {
+          estado: 'finalizada',
+          status: 'finished',
+          finalizadoEn: serverTimestamp(),
+        });
       }
-    } else {
-      setStage(2);
+    } catch (err) {
+      console.warn('Aviso finalizando dinámica en Firebase:', err);
     }
+
+    // Regresar a la Pantalla de Configuración Inicial (Etapa 1)
+    setStage(1);
+    setConnectedPlayers([]);
   };
 
-  // Botón directo y seguro para pantalla completa
+  // Acción de Pantalla Completa segura por clic del usuario
   const handleToggleFullscreenDirect = () => {
     try {
       if (!document.fullscreenElement) {
         if (document.documentElement.requestFullscreen) {
           document.documentElement.requestFullscreen().catch((err) => {
-            console.warn('Aviso de pantalla completa:', err);
+            console.warn('Aviso pantalla completa:', err);
           });
         }
       } else {
@@ -279,321 +399,627 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
     }
   };
 
+  // Números de rondas para columnas del monitor
+  const roundNumbers = useMemo(() => {
+    const count = selectedRounds > 0 ? selectedRounds : 5;
+    return Array.from({ length: count }, (_, i) => i + 1);
+  }, [selectedRounds]);
+
   return (
     <div
       id="teacher-dashboard"
-      className="h-full w-full overflow-y-auto bg-stone-950 text-stone-100 p-3 sm:p-6"
+      className="h-full w-full overflow-y-auto bg-stone-950 text-stone-100 p-3 sm:p-6 select-none"
     >
-      <div className="max-w-4xl mx-auto space-y-6 pb-8">
-        {/* Header */}
+      <div className="max-w-5xl mx-auto space-y-6 pb-12">
+        {/* Header con Controles Superiores */}
         <header className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-stone-800 pb-4">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400">
+            <div className="w-11 h-11 rounded-2xl bg-amber-500/15 border border-amber-500/30 flex items-center justify-center text-amber-400 shrink-0">
               <GraduationCap className="w-6 h-6" />
             </div>
             <div>
               <div className="flex items-center gap-2">
-                <span className="text-[10px] uppercase font-bold tracking-widest px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                  {stage === 2 ? 'Etapa 2: Lobby QR Multijugador' : 'Etapa 3: Monitor de Ronda Activa'}
+                <span className="text-[10px] uppercase font-extrabold tracking-widest px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                  {stage === 1 && 'Paso 1: Configuración de la Sala'}
+                  {stage === 2 && 'Paso 2: Lobby QR y Participantes'}
+                  {stage === 3 && 'Paso 3: Monitor de Ronda Activa'}
                 </span>
-                {isConnecting && (
+                {isConnecting && stage !== 1 && (
                   <span className="text-[10px] text-amber-400 flex items-center gap-1">
                     <Loader2 className="w-3 h-3 animate-spin" />
                     Sincronizando...
                   </span>
                 )}
               </div>
-              <h1 className="text-xl sm:text-2xl font-extrabold text-white font-cinzel">
-                Panel Multijugador del Docente
+              <h1 className="text-xl sm:text-2xl font-black text-white font-cinzel tracking-tight">
+                Panel del Instructor
               </h1>
             </div>
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
             <button
               onClick={handleToggleFullscreenDirect}
-              className="px-3 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-stone-300 hover:text-white text-xs font-semibold cursor-pointer border border-stone-700 flex items-center gap-1.5 transition-colors"
+              className="px-3 py-1.5 rounded-xl bg-stone-900 hover:bg-stone-800 text-stone-300 hover:text-white text-xs font-semibold cursor-pointer border border-stone-700/80 flex items-center gap-1.5 transition-colors"
               title="Alternar Pantalla Completa"
             >
               <Maximize2 className="w-3.5 h-3.5 text-amber-400" />
-              <span className="hidden sm:inline">Pantalla Completa</span>
+              <span>Pantalla Completa</span>
             </button>
-            <a
-              href="/reduccion_cuadricula_taller.html"
-              target="_blank"
-              rel="noreferrer"
-              className="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 text-xs font-bold border border-amber-500/40 flex items-center gap-1.5 transition-colors"
-              title="Abrir versión en pestaña independiente"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-              <span>Abrir Taller Completo</span>
-            </a>
+
             <button
               onClick={onBackToApp}
               className="px-3.5 py-1.5 rounded-xl bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-white text-xs font-semibold cursor-pointer border border-stone-700 flex items-center gap-1.5 transition-colors"
-              title="Cerrar panel y volver al tablero individual"
+              title="Volver a la pantalla principal"
             >
               <X className="w-3.5 h-3.5" />
-              <span>Cerrar</span>
+              <span>Salir</span>
             </button>
           </div>
         </header>
 
         {/* =======================================================
-            LOBBY DE ESPERA MULTIJUGADOR
-            Izquierda: QR grande, código de sala, enlace.
-            Derecha: Participantes Conectados en tiempo real.
-            Botón inferior: Iniciar Ronda 1.
+            ETAPA 1: CONFIGURACIÓN INICIAL DE LA SALA
+            Elegir tamaño (3x3, 4x4, 5x5), tiempo, modo y rondas.
             ======================================================= */}
-        <section
-          id="teacher-stage-lobby"
-          className={`space-y-6 ${stage !== 2 ? 'hidden' : ''}`}
-        >
-          <div className="flex items-center justify-between bg-stone-900 border border-stone-800 p-3 sm:p-4 rounded-2xl">
-            <div className="flex items-center gap-3">
-              <span className="text-xs font-bold text-amber-400 uppercase tracking-wider">Sala Creada:</span>
-              <span className="font-mono text-xl sm:text-2xl font-black text-amber-300 bg-stone-950 px-3 py-1 rounded-xl border border-stone-800">
-                {roomCode}
-              </span>
-            </div>
-            <button
-              onClick={handleCreateRoom}
-              className="text-xs bg-stone-800 hover:bg-stone-700 text-amber-300 px-3 py-1.5 rounded-xl border border-stone-700 cursor-pointer flex items-center gap-1.5 font-medium transition-colors"
-              title="Generar nueva sala con otro código"
-            >
-              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
-              <span>Nuevo Código</span>
-            </button>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6 items-stretch">
-            {/* QR Grande y enlace */}
-            <div className="bg-stone-900 border border-amber-500/30 rounded-3xl p-6 flex flex-col items-center text-center gap-4 shadow-2xl justify-between">
+        {stage === 1 && (
+          <section
+            id="teacher-stage-config"
+            className="space-y-6 animate-in fade-in duration-200"
+          >
+            <div className="bg-stone-900 border border-stone-800 rounded-3xl p-5 sm:p-7 space-y-6 shadow-xl">
               <div>
-                <h3 className="text-lg font-bold text-white">Escanea con tu teléfono para unirte</h3>
-                <p className="text-xs text-stone-400 mt-1">
-                  Cuadrícula {config?.rows || 4}×{config?.cols || 4} • Modo {config?.studentMode === 'tradicional' ? 'Tradicional' : 'Reducción'}
+                <h2 className="text-lg sm:text-xl font-bold text-white flex items-center gap-2 font-cinzel">
+                  <Sliders className="w-5 h-5 text-amber-400" />
+                  <span>Configuración de la Dinámica</span>
+                </h2>
+                <p className="text-xs sm:text-sm text-stone-400 mt-1">
+                  Personaliza los parámetros del ejercicio antes de abrir la sala para tus alumnos.
                 </p>
               </div>
 
-              <div
-                className="bg-white p-3 rounded-2xl shadow-xl cursor-pointer group relative"
-                onClick={() => setIsQrModalOpen(true)}
-                title="Hacer clic para ampliar QR"
-              >
-                {qrDataUrl ? (
-                  <img
-                    src={qrDataUrl}
-                    alt="QR Alumnos"
-                    className="w-52 h-52 sm:w-60 sm:h-60 object-contain"
-                  />
-                ) : (
-                  <div className="w-52 h-52 sm:w-60 sm:h-60 flex items-center justify-center bg-stone-100 text-stone-600">
-                    <Loader2 className="w-8 h-8 animate-spin text-amber-600" />
-                  </div>
-                )}
-                <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 rounded-2xl flex items-center justify-center text-white transition-opacity font-bold text-xs gap-1.5 backdrop-blur-[1px]">
-                  <Maximize2 className="w-5 h-5 text-amber-300" />
-                  <span>Ampliar QR</span>
-                </div>
-              </div>
-
-              <div className="w-full space-y-2">
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    readOnly
-                    value={studentUrl}
-                    className="flex-1 bg-stone-950 border border-stone-800 text-stone-400 text-xs px-3 py-2 rounded-xl font-mono truncate select-all"
-                  />
-                  <button
-                    onClick={handleCopyLink}
-                    className="px-3 py-2 bg-stone-800 hover:bg-stone-700 text-stone-200 text-xs font-semibold rounded-xl border border-stone-700 flex items-center gap-1.5 shrink-0 cursor-pointer transition-colors"
-                  >
-                    {copiedUrl ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
-                    <span>{copiedUrl ? '¡Copiado!' : 'Copiar'}</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* Participantes Conectados */}
-            <div className="bg-stone-900 border border-stone-800 rounded-3xl p-6 flex flex-col justify-between">
-              <div>
-                <div className="flex items-center justify-between border-b border-stone-800 pb-3 mb-3">
-                  <h4 className="font-extrabold text-amber-400 uppercase text-sm tracking-wide flex items-center gap-2">
-                    <Users className="w-4 h-4" />
-                    <span>Participantes Conectados ({connectedPlayers.length})</span>
-                  </h4>
-                  <span className="text-xs text-emerald-400 font-bold flex items-center gap-1">
-                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse"></span>
-                    En línea
-                  </span>
-                </div>
-
-                {connectedPlayers.length === 0 ? (
-                  <div className="flex flex-col justify-center items-center text-center py-8 text-stone-400 space-y-3">
-                    <div className="w-12 h-12 rounded-full bg-stone-800 flex items-center justify-center text-stone-500">
-                      <GraduationCap className="w-6 h-6" />
-                    </div>
-                    <p className="text-xs text-stone-400 leading-relaxed max-w-xs">
-                      Proyecta este código QR en la pizarra o comparte el enlace. A medida que tus alumnos ingresen, sus nombres aparecerán aquí en vivo.
-                    </p>
-                  </div>
-                ) : (
-                  <div className="max-h-64 overflow-y-auto space-y-2 pr-1">
-                    {connectedPlayers.map((player) => (
-                      <div
-                        key={player.id}
-                        className="flex items-center justify-between bg-stone-950 px-3 py-2 rounded-xl border border-stone-800/80"
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6 pt-2">
+                {/* 1. Tamaño de Cuadrícula */}
+                <div className="space-y-3">
+                  <label className="text-xs uppercase font-extrabold tracking-wider text-stone-300 flex items-center gap-1.5">
+                    <span>Tamaño de Cuadrícula</span>
+                  </label>
+                  <div className="grid grid-cols-3 gap-2.5">
+                    {[
+                      { size: 3, label: '3×3', desc: '9 casillas' },
+                      { size: 4, label: '4×4', desc: '16 casillas' },
+                      { size: 5, label: '5×5', desc: '25 casillas' },
+                    ].map((item) => (
+                      <button
+                        key={item.size}
+                        type="button"
+                        onClick={() => setSelectedSize(item.size)}
+                        className={`p-3 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center ${
+                          selectedSize === item.size
+                            ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-md shadow-amber-500/10'
+                            : 'bg-stone-950 border-stone-800 text-stone-400 hover:border-stone-700 hover:text-stone-200'
+                        }`}
                       >
-                        <div className="flex items-center gap-2">
-                          <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-400 flex items-center justify-center text-xs font-bold">
-                            {player.name.charAt(0).toUpperCase()}
-                          </div>
-                          <span className="text-xs font-semibold text-stone-200">
-                            {player.name}
-                          </span>
-                        </div>
-                        <span className="text-[11px] px-2 py-0.5 rounded-full font-medium bg-stone-800 text-stone-300">
-                          Listo
-                        </span>
-                      </div>
+                        <span className="text-lg font-black font-mono">{item.label}</span>
+                        <span className="text-[10px] mt-0.5 opacity-80">{item.desc}</span>
+                      </button>
                     ))}
                   </div>
-                )}
+                </div>
+
+                {/* 2. Modo de Juego */}
+                <div className="space-y-3">
+                  <label className="text-xs uppercase font-extrabold tracking-wider text-stone-300">
+                    Modo del Alumno
+                  </label>
+                  <div className="grid grid-cols-3 gap-2.5">
+                    {[
+                      { id: 'reduccion', name: 'Descarte 9s', desc: 'Regla del 9' },
+                      { id: 'tradicional', name: 'Tradicional', desc: 'Suma mental' },
+                      { id: 'libre', name: 'Libre', desc: 'Elige modo' },
+                    ].map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        onClick={() => setSelectedMode(m.id as any)}
+                        className={`p-3 rounded-2xl border text-center transition-all cursor-pointer flex flex-col items-center justify-center ${
+                          selectedMode === m.id
+                            ? 'bg-amber-500/20 border-amber-500 text-amber-300 shadow-md shadow-amber-500/10'
+                            : 'bg-stone-950 border-stone-800 text-stone-400 hover:border-stone-700 hover:text-stone-200'
+                        }`}
+                      >
+                        <span className="text-xs sm:text-sm font-bold">{m.name}</span>
+                        <span className="text-[10px] mt-0.5 opacity-80">{m.desc}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 3. Número de Rondas */}
+                <div className="space-y-3">
+                  <label className="text-xs uppercase font-extrabold tracking-wider text-stone-300">
+                    Número de Rondas Asignadas
+                  </label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[
+                      { rounds: 1, label: '1 ronda' },
+                      { rounds: 3, label: '3 rondas' },
+                      { rounds: 5, label: '5 rondas' },
+                      { rounds: 10, label: '10 rondas' },
+                    ].map((r) => (
+                      <button
+                        key={r.rounds}
+                        type="button"
+                        onClick={() => setSelectedRounds(r.rounds)}
+                        className={`py-2.5 px-2 rounded-xl border text-center text-xs font-bold transition-all cursor-pointer ${
+                          selectedRounds === r.rounds
+                            ? 'bg-amber-500 text-stone-950 border-amber-400 font-extrabold shadow-sm'
+                            : 'bg-stone-950 border-stone-800 text-stone-400 hover:border-stone-700 hover:text-stone-200'
+                        }`}
+                      >
+                        {r.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* 4. Tiempo Límite por Ronda */}
+                <div className="space-y-3">
+                  <label className="text-xs uppercase font-extrabold tracking-wider text-stone-300">
+                    Tiempo Límite por Ronda
+                  </label>
+                  <div className="grid grid-cols-4 gap-2">
+                    {[
+                      { sec: 0, label: 'Sin límite' },
+                      { sec: 30, label: '30 seg' },
+                      { sec: 60, label: '60 seg' },
+                      { sec: 120, label: '2 min' },
+                    ].map((t) => (
+                      <button
+                        key={t.sec}
+                        type="button"
+                        onClick={() => setSelectedTimeLimit(t.sec)}
+                        className={`py-2.5 px-2 rounded-xl border text-center text-xs font-bold transition-all cursor-pointer ${
+                          selectedTimeLimit === t.sec
+                            ? 'bg-amber-500 text-stone-950 border-amber-400 font-extrabold shadow-sm'
+                            : 'bg-stone-950 border-stone-800 text-stone-400 hover:border-stone-700 hover:text-stone-200'
+                        }`}
+                      >
+                        {t.label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               </div>
 
-              <div className="pt-4 border-t border-stone-800/80 flex items-center justify-between gap-2">
+              {/* Botón de Confirmación para pasar a Etapa 2 */}
+              <div className="pt-4 border-t border-stone-800 flex justify-end">
                 <button
-                  onClick={onLaunchStudentView}
-                  className="flex-1 px-3 py-2 bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs rounded-xl border border-stone-700 cursor-pointer text-center transition-colors"
+                  id="btn-confirm-config"
+                  type="button"
+                  onClick={handleConfirmConfigAndCreateRoom}
+                  className="w-full sm:w-auto px-7 py-3 bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-sm rounded-2xl shadow-lg shadow-amber-500/20 flex items-center justify-center gap-2 cursor-pointer transition-all transform active:scale-95"
                 >
-                  Abrir vista previa de alumno
-                </button>
-                <button
-                  onClick={onLaunchProjector}
-                  className="px-3 py-2 bg-stone-800 hover:bg-stone-700 text-amber-400 text-xs rounded-xl border border-stone-700 cursor-pointer flex items-center gap-1.5 transition-colors"
-                >
-                  <Tv className="w-3.5 h-3.5" />
-                  <span>Proyector</span>
+                  <span>Crear Sala y Generar QR</span>
+                  <Play className="w-4 h-4 fill-stone-950" />
                 </button>
               </div>
             </div>
-          </div>
-
-          {/* Botón inferior: Iniciar Ronda 1 */}
-          <div className="pt-2 text-center">
-            <button
-              id="btn-start-round-react"
-              onClick={handleStartGame}
-              className="w-full py-4 px-6 bg-emerald-500 hover:bg-emerald-400 text-stone-950 font-black text-base sm:text-lg rounded-2xl shadow-xl shadow-emerald-500/25 flex items-center justify-center gap-2 cursor-pointer transition-all transform hover:-translate-y-0.5"
-            >
-              <Play className="w-5 h-5 text-stone-950 fill-current" />
-              <span>▶ Iniciar Ronda 1</span>
-            </button>
-          </div>
-        </section>
+          </section>
+        )}
 
         {/* =======================================================
-            ETAPA 3: Monitor de Ronda Activa
+            ETAPA 2: LOBBY QR Y PARTICIPANTES EN VIVO
+            Código numérico (ej. 8520), QR proyectable,
+            lista de participantes y botón "Iniciar Dinámica".
             ======================================================= */}
-        <section
-          id="teacher-stage-live"
-          className={`space-y-6 ${stage !== 3 ? 'hidden' : ''}`}
-        >
-          <div className="bg-stone-900 border border-stone-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-            <div className="flex items-center gap-3">
-              <span className="px-3 py-1 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-black">
-                RONDA {currentRound} / {(config?.roundsCount && config.roundsCount > 0) ? config.roundsCount : 'Libre'}
-              </span>
-              <span className="text-xs font-bold text-sky-400 uppercase">
-                {config?.studentMode === 'tradicional'
-                  ? 'Modo Tradicional'
-                  : 'Modo Reducción'}
-              </span>
-            </div>
-
-            <div className="flex items-center gap-3">
-              <button
-                onClick={onLaunchProjector}
-                className="px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs font-semibold rounded-xl border border-stone-700 flex items-center gap-1.5 cursor-pointer"
-              >
-                <Tv className="w-3.5 h-3.5 text-amber-400" />
-                <span>Pizarra Gigante</span>
-              </button>
-              <button
-                id="btn-next-round-react"
-                onClick={handleNextRound}
-                className="px-4 py-2 bg-amber-500 hover:bg-amber-400 text-stone-950 text-xs sm:text-sm font-extrabold rounded-xl shadow-md cursor-pointer transition-colors"
-              >
-                {currentRound < ((config?.roundsCount && config.roundsCount > 0) ? config.roundsCount : 5)
-                  ? 'Siguiente Ronda →'
-                  : 'Finalizar Partida'}
-              </button>
-            </div>
-          </div>
-
-          {/* Progreso en Vivo */}
-          <div className="bg-stone-900 border border-stone-800 rounded-2xl p-5 space-y-4">
-            <div className="flex items-center justify-between border-b border-stone-800 pb-3">
-              <h3 className="text-sm font-bold text-stone-200">Progreso de Alumnos en Vivo</h3>
-              <span className="text-xs text-stone-400">
-                Privacidad estricta: Respuestas protegidas
-              </span>
-            </div>
-
-            {connectedPlayers.length > 0 ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-3">
-                {connectedPlayers.map((player) => (
-                  <div
-                    key={player.id}
-                    className={`p-3 rounded-xl border flex items-center justify-between ${
-                      player.isFinished
-                        ? 'bg-emerald-950/40 border-emerald-500/50 text-emerald-300'
-                        : 'bg-stone-950 border-stone-800 text-stone-300'
-                    }`}
-                  >
-                    <span className="text-xs font-semibold truncate max-w-[120px]">
-                      {player.name}
+        {stage === 2 && (
+          <section
+            id="teacher-stage-lobby"
+            className="space-y-6 animate-in fade-in duration-200"
+          >
+            {/* Tarjeta de Código de Sala y QR */}
+            <div className="grid grid-cols-1 md:grid-cols-12 gap-6 bg-stone-900 border border-stone-800 rounded-3xl p-6 sm:p-8 shadow-xl">
+              {/* Bloque Izquierdo: Datos de la sala */}
+              <div className="md:col-span-7 flex flex-col justify-between space-y-6">
+                <div>
+                  <div className="flex items-center gap-2 text-xs font-extrabold text-amber-400 uppercase tracking-widest">
+                    <span>Sala de Aula Activa</span>
+                  </div>
+                  <div className="mt-2 flex items-baseline gap-3">
+                    <span className="text-4xl sm:text-6xl font-black text-white font-mono tracking-wider">
+                      {roomCode}
                     </span>
-                    <span
-                      className={`text-[11px] px-2 py-0.5 rounded-full font-bold flex items-center gap-1 ${
-                        player.isFinished
-                          ? 'bg-emerald-500/20 text-emerald-300'
-                          : 'bg-amber-500/20 text-amber-300'
-                      }`}
+                    <span className="text-xs sm:text-sm font-semibold text-stone-400">
+                      ({selectedSize}×{selectedSize} • {selectedMode})
+                    </span>
+                  </div>
+                  <p className="text-xs sm:text-sm text-stone-300 mt-2">
+                    Comparte este código numérico o proyecta el código QR para que los alumnos ingresen desde su dispositivo.
+                  </p>
+                </div>
+
+                {/* Enlace directo para compartir */}
+                <div className="space-y-2">
+                  <label className="text-[11px] uppercase font-bold text-stone-400">
+                    Enlace de Acceso Directo:
+                  </label>
+                  <div className="flex items-center gap-2 bg-stone-950 p-2 rounded-2xl border border-stone-800">
+                    <input
+                      type="text"
+                      readOnly
+                      value={studentUrl}
+                      className="bg-transparent text-xs text-stone-300 font-mono flex-1 outline-none px-2 select-all"
+                    />
+                    <button
+                      onClick={handleCopyLink}
+                      className="px-3 py-1.5 bg-stone-800 hover:bg-stone-700 text-stone-200 rounded-xl text-xs font-semibold flex items-center gap-1.5 cursor-pointer border border-stone-700 transition-colors"
+                      title="Copiar enlace al portapapeles"
                     >
-                      {player.isFinished ? (
+                      {copiedUrl ? (
                         <>
-                          <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                          <span>Terminado</span>
+                          <Check className="w-3.5 h-3.5 text-emerald-400" />
+                          <span className="text-emerald-400">¡Copiado!</span>
                         </>
                       ) : (
                         <>
-                          <span className="w-1.5 h-1.5 rounded-full bg-amber-400 animate-ping" />
-                          <span>Pensando...</span>
+                          <Copy className="w-3.5 h-3.5 text-stone-400" />
+                          <span>Copiar</span>
                         </>
                       )}
-                    </span>
+                    </button>
                   </div>
-                ))}
-              </div>
-            ) : (
-              <div className="p-8 text-center text-stone-400 space-y-2">
-                <div className="text-amber-400 font-bold text-sm">
-                  Ronda en curso: Cuadrícula {config?.rows || 4}×{config?.cols || 4} activa
                 </div>
-                <p className="text-xs text-stone-400 max-w-md mx-auto">
-                  Los alumnos ven la cuadrícula en sus dispositivos. Su estatus cambiará de &quot;Pensando...&quot; a &quot;✓ Terminado&quot; en tiempo real.
-                </p>
+
+                {/* Acciones de Pizarra y Ajustes */}
+                <div className="flex items-center gap-3 pt-2">
+                  <button
+                    onClick={() => setStage(1)}
+                    className="px-4 py-2 bg-stone-800 hover:bg-stone-700 text-stone-300 rounded-xl text-xs font-semibold cursor-pointer border border-stone-700 transition-colors"
+                  >
+                    Modificar Configuración
+                  </button>
+                  <button
+                    onClick={onLaunchStudentView}
+                    className="px-4 py-2 bg-stone-800 hover:bg-stone-700 text-amber-300 rounded-xl text-xs font-semibold cursor-pointer border border-stone-700 transition-colors"
+                  >
+                    Probar como Alumno
+                  </button>
+                </div>
               </div>
-            )}
-          </div>
-        </section>
+
+              {/* Bloque Derecho: QR Interactivo */}
+              <div className="md:col-span-5 flex flex-col items-center justify-center p-4 bg-stone-950 rounded-2xl border border-stone-800 text-center space-y-3">
+                <div
+                  onClick={() => setIsQrModalOpen(true)}
+                  className="bg-white p-3 rounded-2xl shadow-xl cursor-pointer hover:scale-105 transition-transform w-48 h-48 sm:w-56 sm:h-56 flex items-center justify-center"
+                  title="Haz clic para agrandar el código QR"
+                >
+                  {qrDataUrl ? (
+                    <img
+                      src={qrDataUrl}
+                      alt={`QR de Acceso Sala ${roomCode}`}
+                      className="w-full h-full object-contain"
+                    />
+                  ) : (
+                    <Loader2 className="w-8 h-8 animate-spin text-stone-400" />
+                  )}
+                </div>
+                <button
+                  onClick={() => setIsQrModalOpen(true)}
+                  className="text-xs text-amber-400 hover:text-amber-300 font-semibold cursor-pointer flex items-center gap-1"
+                >
+                  <Tv className="w-3.5 h-3.5" />
+                  <span>Agrandar QR para Proyector</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Panel de Participantes en Vivo */}
+            <div className="bg-stone-900 border border-stone-800 rounded-3xl p-6 space-y-4 shadow-xl">
+              <div className="flex items-center justify-between border-b border-stone-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <Users className="w-5 h-5 text-amber-400" />
+                  <h3 className="text-base font-bold text-white">
+                    PARTICIPANTES CONECTADOS ({connectedPlayers.length})
+                  </h3>
+                </div>
+                <div className="text-xs text-stone-400 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                  <span>Escuchando en tiempo real</span>
+                </div>
+              </div>
+
+              {connectedPlayers.length > 0 ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5 max-h-60 overflow-y-auto pr-1">
+                  {connectedPlayers.map((player) => (
+                    <div
+                      key={player.id}
+                      className="bg-stone-950 border border-stone-800/90 rounded-xl p-2.5 flex items-center gap-2.5 shadow-sm"
+                    >
+                      <div className="w-7 h-7 rounded-lg bg-amber-500/20 text-amber-300 flex items-center justify-center font-bold text-xs shrink-0">
+                        {player.name.charAt(0).toUpperCase()}
+                      </div>
+                      <span className="text-xs font-semibold text-stone-200 truncate">
+                        {player.name}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="py-8 text-center text-stone-400 space-y-2">
+                  <UserCheck className="w-8 h-8 text-stone-600 mx-auto" />
+                  <p className="text-xs sm:text-sm">
+                    Aún no hay participantes conectados en la sala <strong className="text-amber-400">{roomCode}</strong>.
+                  </p>
+                  <p className="text-[11px] text-stone-500">
+                    Pide a los alumnos escanear el QR o abrir el enlace con su dispositivo móvil.
+                  </p>
+                </div>
+              )}
+
+              {/* Botón Principal: "Iniciar Dinámica" */}
+              <div className="pt-3 border-t border-stone-800 flex justify-end">
+                <button
+                  id="btn-start-dynamic"
+                  onClick={handleStartDynamic}
+                  disabled={connectedPlayers.length === 0}
+                  className={`w-full sm:w-auto px-8 py-3.5 rounded-2xl font-black text-sm flex items-center justify-center gap-2 shadow-xl transition-all cursor-pointer ${
+                    connectedPlayers.length > 0
+                      ? 'bg-emerald-500 hover:bg-emerald-400 text-stone-950 shadow-emerald-500/20 transform active:scale-95'
+                      : 'bg-stone-800 text-stone-500 cursor-not-allowed border border-stone-700'
+                  }`}
+                  title={
+                    connectedPlayers.length === 0
+                      ? 'Esperando a que al menos un participante ingrese a la sala'
+                      : 'Comenzar la dinámica para todos los alumnos'
+                  }
+                >
+                  <Play className="w-4 h-4 fill-current" />
+                  <span>
+                    {connectedPlayers.length === 0
+                      ? 'Esperando Participantes...'
+                      : `Iniciar Dinámica (${connectedPlayers.length} alumnos)`}
+                  </span>
+                </button>
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* =======================================================
+            ETAPA 3: MONITOR DE RONDA ACTIVA
+            Muestra el progreso de cada alumno en columnas claras por ronda.
+            Avance autónomo de cada participante.
+            Botón "Finalizar Dinámica" para cerrar la sala y volver a etapa 1.
+            ======================================================= */}
+        {stage === 3 && (
+          <section
+            id="teacher-stage-live"
+            className="space-y-6 animate-in fade-in duration-200"
+          >
+            {/* Barra superior de control del Monitor */}
+            <div className="bg-stone-900 border border-stone-800 rounded-2xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xl">
+              <div className="flex items-center gap-3 flex-wrap">
+                <span className="px-3 py-1 rounded-xl bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-black">
+                  SALA {roomCode}
+                </span>
+                <span className="text-xs font-bold text-sky-400 uppercase">
+                  Cuadrícula {selectedSize}×{selectedSize} • {selectedMode} • {selectedRounds} Rondas
+                </span>
+              </div>
+
+              {/* Botones de Acción: Pizarra Gigante y Finalizar Dinámica */}
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={onLaunchProjector}
+                  className="px-3.5 py-2 bg-stone-800 hover:bg-stone-700 text-stone-300 text-xs font-semibold rounded-xl border border-stone-700 flex items-center gap-1.5 cursor-pointer transition-colors"
+                  title="Abrir la Pizarra Gigante para proyectar"
+                >
+                  <Tv className="w-3.5 h-3.5 text-amber-400" />
+                  <span>Pizarra Gigante</span>
+                </button>
+
+                <button
+                  id="btn-finish-dynamic"
+                  onClick={handleEndDynamic}
+                  className="px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white text-xs sm:text-sm font-black rounded-xl shadow-lg hover:shadow-rose-600/30 cursor-pointer transition-all flex items-center gap-2"
+                  title="Finalizar la dinámica y regresar a la configuración inicial"
+                >
+                  <XCircle className="w-4 h-4" />
+                  <span>Finalizar Dinámica</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Panel de Progreso de Participantes Estructurado en Columnas */}
+            <div className="bg-stone-900 border border-stone-800 rounded-3xl p-5 sm:p-6 space-y-4 shadow-xl">
+              <div className="flex items-center justify-between border-b border-stone-800 pb-3">
+                <div className="flex items-center gap-2">
+                  <Users className="w-4 h-4 text-amber-400" />
+                  <h3 className="text-sm sm:text-base font-bold text-stone-100">
+                    Progreso en Tiempo Real ({connectedPlayers.length} Participantes)
+                  </h3>
+                </div>
+                <div className="text-xs text-stone-400 flex items-center gap-3">
+                  <span>
+                    Completados:{' '}
+                    <strong className="text-emerald-400">
+                      {connectedPlayers.filter((p) => p.isFinished).length}
+                    </strong>{' '}
+                    / {connectedPlayers.length}
+                  </span>
+                </div>
+              </div>
+
+              {connectedPlayers.length > 0 ? (
+                <div className="overflow-x-auto">
+                  <div className="min-w-[650px] space-y-2">
+                    {/* Encabezado de la Tabla */}
+                    <div className="flex items-center px-4 py-2 text-[11px] font-bold uppercase tracking-wider text-stone-400 border-b border-stone-800/80">
+                      <div className="w-48 sm:w-56 shrink-0">Participante</div>
+                      <div
+                        className="flex-1 grid gap-2"
+                        style={{
+                          gridTemplateColumns: `repeat(${roundNumbers.length}, minmax(0, 1fr))`,
+                        }}
+                      >
+                        {roundNumbers.map((rNum) => (
+                          <div key={rNum} className="text-center font-mono">
+                            Ronda {rNum}
+                          </div>
+                        ))}
+                      </div>
+                      <div className="w-28 shrink-0 text-right">Estado</div>
+                    </div>
+
+                    {/* Filas por Participante */}
+                    {connectedPlayers.map((player) => {
+                      const isFinishedAll =
+                        player.isFinished ||
+                        (selectedRounds > 0 && player.currentRound > selectedRounds);
+
+                      return (
+                        <div
+                          key={player.id}
+                          className={`px-4 py-3 rounded-2xl border transition-all flex items-center gap-3 ${
+                            isFinishedAll
+                              ? 'bg-emerald-950/20 border-emerald-500/30'
+                              : 'bg-stone-950/80 border-stone-800'
+                          }`}
+                        >
+                          {/* Columna 1: Identidad (Nombre Real) */}
+                          <div className="w-48 sm:w-56 shrink-0 flex items-center gap-3">
+                            <div
+                              className={`w-9 h-9 rounded-xl flex items-center justify-center font-bold text-sm shrink-0 ${
+                                isFinishedAll
+                                  ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30'
+                                  : 'bg-amber-500/20 text-amber-400 border border-amber-500/30'
+                              }`}
+                            >
+                              {player.name.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="truncate">
+                              <div
+                                className="font-bold text-sm text-white truncate"
+                                title={player.name}
+                              >
+                                {player.name}
+                              </div>
+                              <div className="text-[11px] text-stone-400 flex items-center gap-1 mt-0.5">
+                                {isFinishedAll ? (
+                                  <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                                    <CheckCircle2 className="w-3 h-3" />
+                                    Completado
+                                  </span>
+                                ) : (
+                                  <span className="text-amber-400 font-medium">
+                                    En ronda {Math.min(player.currentRound, selectedRounds)}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Columnas de Rondas (una sección por cada ronda) */}
+                          <div
+                            className="flex-1 grid gap-2"
+                            style={{
+                              gridTemplateColumns: `repeat(${roundNumbers.length}, minmax(0, 1fr))`,
+                            }}
+                          >
+                            {roundNumbers.map((rNum) => {
+                              const rData = player.rondas?.[rNum];
+                              const isCompleted =
+                                rData?.completada || rData?.tiempo !== undefined;
+                              const isCurrent = player.currentRound === rNum && !isFinishedAll;
+
+                              // Estado 1: Completado con tiempo registrado
+                              if (isCompleted) {
+                                return (
+                                  <div
+                                    key={rNum}
+                                    className="bg-emerald-950/50 border border-emerald-500/50 text-emerald-300 rounded-xl py-2 px-1.5 flex flex-col items-center justify-center gap-0.5 shadow-sm"
+                                    title={`Ronda ${rNum} completada en ${rData?.tiempo ?? 0}s`}
+                                  >
+                                    <div className="flex items-center gap-1">
+                                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                                      <span className="font-mono font-bold text-xs sm:text-sm text-emerald-200">
+                                        {rData?.tiempo !== undefined
+                                          ? `${rData.tiempo.toFixed(1)}s`
+                                          : '✓'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              }
+
+                              // Estado 2: En juego activo
+                              if (isCurrent) {
+                                return (
+                                  <div
+                                    key={rNum}
+                                    className="bg-amber-500/15 border border-amber-500/40 text-amber-300 rounded-xl py-2 px-1.5 flex flex-col items-center justify-center gap-1 shadow-sm"
+                                    title={`Ronda ${rNum} en progreso`}
+                                  >
+                                    <div className="flex items-center gap-1.5">
+                                      <span className="w-2 h-2 rounded-full bg-amber-400 animate-ping shrink-0" />
+                                      <span className="text-[11px] font-bold text-amber-300 tracking-tight">
+                                        En juego...
+                                      </span>
+                                    </div>
+                                  </div>
+                                );
+                              }
+
+                              // Estado 3: Pendiente / Bloqueada
+                              return (
+                                <div
+                                  key={rNum}
+                                  className="bg-stone-950/40 border border-stone-800 text-stone-600 rounded-xl py-2 px-1.5 flex flex-col items-center justify-center gap-0.5"
+                                  title={`Ronda ${rNum} pendiente`}
+                                >
+                                  <span className="font-mono text-xs text-stone-600">—</span>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {/* Columna Final: Resumen */}
+                          <div className="w-28 shrink-0 text-right">
+                            {isFinishedAll ? (
+                              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 text-xs font-mono font-bold">
+                                <Trophy className="w-3 h-3 text-amber-400" />
+                                {player.totalTime ? `${player.totalTime}s` : 'Listo'}
+                              </span>
+                            ) : (
+                              <span className="inline-block px-2 py-1 rounded-lg bg-stone-950 text-stone-400 border border-stone-800 text-[11px] font-medium">
+                                {Object.keys(player.rondas || {}).length}/{selectedRounds} rds
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : (
+                <div className="p-8 text-center text-stone-400 space-y-2">
+                  <Clock className="w-8 h-8 text-stone-600 mx-auto" />
+                  <div className="text-amber-400 font-bold text-sm">
+                    Ronda activa: Cuadrícula {selectedSize}×{selectedSize} en juego
+                  </div>
+                  <p className="text-xs text-stone-400 max-w-md mx-auto">
+                    Los alumnos avanzan ronda a ronda de forma autónoma. Conforme envíen sus respuestas correctas, verás sus tiempos actualizados de inmediato en cada casilla.
+                  </p>
+                </div>
+              )}
+            </div>
+          </section>
+        )}
       </div>
 
-      {/* Fullscreen QR Modal for Projector projection */}
+      {/* Modal QR Gigante para Proyector / Pizarra */}
       {isQrModalOpen && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md select-none animate-in fade-in duration-150"
@@ -605,11 +1031,9 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
           >
             <div className="flex items-center justify-between w-full">
               <div className="text-left">
-                <h3 className="font-bold text-lg text-white font-cinzel">
-                  Escanear para Unirse
-                </h3>
+                <h3 className="font-bold text-lg text-white font-cinzel">Escanear para Unirse</h3>
                 <p className="text-xs text-amber-400">
-                  Sala {roomCode} • {config?.rows || 4}×{config?.cols || 4}
+                  Sala {roomCode} • {selectedSize}×{selectedSize}
                 </p>
               </div>
               <button
@@ -620,12 +1044,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               </button>
             </div>
 
-            {/* Giant QR Canvas */}
-            <div className="bg-white p-3 sm:p-4 rounded-2xl shadow-xl w-64 h-64 sm:w-72 sm:h-72 flex items-center justify-center">
+            <div className="bg-white p-4 rounded-2xl shadow-xl w-64 h-64 sm:w-72 sm:h-72 flex items-center justify-center">
               {qrDataUrl && (
                 <img
                   src={qrDataUrl}
-                  alt="QR Code Alumnos"
+                  alt={`QR Alumnos Sala ${roomCode}`}
                   className="w-full h-full object-contain"
                 />
               )}
@@ -639,7 +1062,11 @@ export const TeacherDashboard: React.FC<TeacherDashboardProps> = ({
               onClick={handleCopyLink}
               className="w-full py-2.5 bg-stone-800 hover:bg-stone-700 text-stone-200 font-semibold rounded-xl text-xs flex items-center justify-center gap-2 cursor-pointer border border-stone-700"
             >
-              {copiedUrl ? <Check className="w-4 h-4 text-emerald-400" /> : <Copy className="w-4 h-4" />}
+              {copiedUrl ? (
+                <Check className="w-4 h-4 text-emerald-400" />
+              ) : (
+                <Copy className="w-4 h-4 text-stone-400" />
+              )}
               <span>{copiedUrl ? '¡Enlace copiado al portapapeles!' : 'Copiar enlace directo'}</span>
             </button>
           </div>

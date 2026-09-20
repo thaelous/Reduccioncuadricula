@@ -121,10 +121,11 @@ export const TopNav: React.FC<TopNavProps> = ({
           <button
             id="btn-help-tutorial"
             onClick={onOpenTutorial}
-            className="p-1.5 rounded-lg bg-stone-800 hover:bg-stone-700 text-stone-300 hover:text-amber-400 text-xs cursor-pointer border border-stone-700"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-stone-950 font-black text-xs uppercase tracking-wider shadow-md shadow-amber-500/25 border border-amber-400 hover:scale-105 active:scale-95 transition-all cursor-pointer"
             title="Tutorial y ayuda del modo activo"
           >
-            <HelpCircle className="w-4 h-4" />
+            <HelpCircle className="w-4 h-4 stroke-[2.5]" />
+            <span className="font-extrabold tracking-wide">TUTORIAL</span>
           </button>
         </div>
       </div>

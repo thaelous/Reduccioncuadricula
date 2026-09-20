@@ -30,15 +30,17 @@ import { ProjectorView } from './components/ProjectorView';
 import { StudentHeader } from './components/StudentHeader';
 import { StudentHelpModal } from './components/StudentHelpModal';
 import { StudentFinishedModal } from './components/StudentFinishedModal';
+import { StudentWaitingRoom, RoomSyncConfig } from './components/StudentWaitingRoom';
 import { ErrorBoundary } from './components/ErrorBoundary';
-import { AuthModal } from './components/AuthModal';
 import { ActiveSessionBar } from './components/ActiveSessionBar';
 import {
   getStoredSession,
   logoutSession,
   subscribeToAuthState,
   AuthSessionData,
+  getFirebaseRtdb,
 } from './services/firebaseAuth';
+import { ref, set, update, onValue, off, serverTimestamp } from 'firebase/database';
 import { GraduationCap, X, Maximize, Minimize } from 'lucide-react';
 
 const DEFAULT_CLASSROOM_CONFIG: ClassroomConfig = {
@@ -58,57 +60,38 @@ export default function App() {
   }, []);
 
   // EXCEPCIÓN DE ALUMNOS: Si la URL contiene parámetro de sala o acceso de participante
-  const isStudentException = useMemo(() => {
+  const isStudentFromUrl = useMemo(() => {
     return (
       initialUrlParams.has('sala') ||
       initialUrlParams.has('room') ||
       initialUrlParams.get('role') === 'alumno' ||
       initialUrlParams.get('role') === 'student' ||
       initialUrlParams.has('alumno') ||
-      initialUrlParams.has('student') ||
-      initialUrlParams.has('seed')
+      initialUrlParams.has('student')
     );
   }, [initialUrlParams]);
 
   // Sesión de autenticación del docente
   const [sessionData, setSessionData] = useState<AuthSessionData | null>(() => {
-    if (isStudentException) return null;
+    if (isStudentFromUrl) return null;
     return getStoredSession();
-  });
-
-  // Estado de autorización: Alumnos entran directo; docentes requieren validar sesión
-  const [isAuthorized, setIsAuthorized] = useState<boolean>(() => {
-    if (isStudentException) return true;
-    return !!getStoredSession();
   });
 
   // Escuchar cambios de sesión en Firebase
   useEffect(() => {
-    if (isStudentException) return;
+    if (isStudentFromUrl) return;
     const unsubscribe = subscribeToAuthState((firebaseUser) => {
-      if (!firebaseUser && !getStoredSession()) {
-        setIsAuthorized(false);
-        setSessionData(null);
+      if (firebaseUser) {
+        setSessionData(getStoredSession());
       }
     });
     return () => unsubscribe();
-  }, [isStudentException]);
-
-  const handleAuthSuccess = (newSession: AuthSessionData) => {
-    setSessionData(newSession);
-    setIsAuthorized(true);
-  };
+  }, [isStudentFromUrl]);
 
   const handleLogout = async () => {
     await logoutSession();
     setSessionData(null);
-    setIsAuthorized(false);
   };
-
-  const isStudentFromUrl = useMemo(() => {
-    const roleParam = initialUrlParams.get('role');
-    return roleParam === 'alumno' || initialUrlParams.has('alumno') || isStudentException;
-  }, [initialUrlParams, isStudentException]);
 
   // 2. User Role State: 'teacher' | 'student' | 'projector'
   const [userRole, setUserRole] = useState<UserRole>(() => {
@@ -116,13 +99,17 @@ export default function App() {
     return 'teacher';
   });
 
+  // Control de la vista del alumno: si está en sala de espera o ya en partida activa
+  const [isStudentInGame, setIsStudentInGame] = useState(false);
+  const [activeStudentRoom, setActiveStudentRoom] = useState<RoomSyncConfig | null>(null);
+
   // Track if current student session was launched from teacher preview
   const [isTeacherPreviewingStudent, setIsTeacherPreviewingStudent] = useState(false);
 
   // Teacher dashboard overlay inside teacher role
   const [isTeacherDashboardOpen, setIsTeacherDashboardOpen] = useState(false);
 
-  // 3. Classroom Config State (persisted in localStorage)
+  // 3. Classroom Config State
   const [classroomConfig, setClassroomConfig] = useState<ClassroomConfig>(() => {
     const saved = localStorage.getItem('aula_teacher_config');
     if (saved) {
@@ -152,8 +139,8 @@ export default function App() {
     };
   });
 
-  // 6. Splash screen state (always true by default so Main Screen is the default landing screen)
-  const [showSplash, setShowSplash] = useState(true);
+  // 6. Splash screen state: Se muestra al inicio a menos que se acceda directamente con enlace de sala
+  const [showSplash, setShowSplash] = useState<boolean>(() => !isStudentFromUrl);
 
   // Fullscreen state
   const [isFullscreen, setIsFullscreen] = useState(false);
@@ -164,83 +151,84 @@ export default function App() {
       if (!document.fullscreenElement) {
         if (document.documentElement.requestFullscreen) {
           document.documentElement.requestFullscreen().catch((err) => {
-            console.warn("Aviso de pantalla completa:", err);
+            console.warn('Aviso de pantalla completa:', err);
           });
         }
       } else {
         if (document.exitFullscreen) {
           document.exitFullscreen().catch((err) => {
-            console.warn("Aviso saliendo de pantalla completa:", err);
+            console.warn('Aviso saliendo de pantalla completa:', err);
           });
         }
       }
     } catch (err) {
-      console.warn("Excepción al alternar pantalla completa:", err);
+      console.warn('Excepción al alternar pantalla completa:', err);
     }
   };
 
-  // Escuchar cambios de estado de pantalla completa
   useEffect(() => {
-    const handleFullscreenChange = () => {
+    const handleFsChange = () => {
       setIsFullscreen(!!document.fullscreenElement);
     };
-    document.addEventListener('fullscreenchange', handleFullscreenChange);
-
-    return () => {
-      document.removeEventListener('fullscreenchange', handleFullscreenChange);
-    };
+    document.addEventListener('fullscreenchange', handleFsChange);
+    return () => document.removeEventListener('fullscreenchange', handleFsChange);
   }, []);
 
-  // 7. Active game mode: 'tradicional' | 'reduccion' | 'comparativa'
+  // Update classroom config and save to local storage
+  const handleUpdateClassroomConfig = (newConfig: Partial<ClassroomConfig>) => {
+    setClassroomConfig((prev) => {
+      const updated = { ...prev, ...newConfig };
+      try {
+        localStorage.setItem('aula_teacher_config', JSON.stringify(updated));
+      } catch (e) {
+        console.error('Error saving aula_teacher_config', e);
+      }
+      return updated;
+    });
+  };
+
+  // 7. Core Interactive State
   const [currentMode, setCurrentMode] = useState<GameMode>(() => {
-    if (isStudentFromUrl) {
-      const modeParam = initialUrlParams.get('m');
-      if (modeParam === 'tradicional') return 'tradicional';
-      if (modeParam === 'reduccion') return 'reduccion';
-      if (modeParam === 'comparativa') return 'comparativa';
-    }
-    return classroomConfig.studentMode === 'tradicional' ? 'tradicional' : 'reduccion';
+    const m = initialUrlParams.get('m') || initialUrlParams.get('mode');
+    if (m === 'tradicional') return 'tradicional';
+    if (m === 'comparativa') return 'comparativa';
+    return 'reduccion';
   });
 
-  // 8. Grid dimensions
   const [gridConfig, setGridConfig] = useState<GridConfig>(() => {
-    const rParam = initialUrlParams.get('r');
-    const cParam = initialUrlParams.get('c');
-    const r = rParam ? parseInt(rParam, 10) : classroomConfig.rows;
-    const c = cParam ? parseInt(cParam, 10) : classroomConfig.cols;
-    return {
-      rows: r >= 3 && r <= 7 ? r : 4,
-      cols: c >= 3 && c <= 7 ? c : 4,
-    };
+    const r = initialUrlParams.get('r') || initialUrlParams.get('rows');
+    const c = initialUrlParams.get('c') || initialUrlParams.get('cols');
+    const rows = r ? parseInt(r, 10) : classroomConfig.rows;
+    const cols = c ? parseInt(c, 10) : classroomConfig.cols;
+    return { rows: rows || 4, cols: cols || 4 };
   });
 
-  // Persistent grid cells across modes
   const [gridCells, setGridCells] = useState<GridCell[]>([]);
-
-  // Tradicional mode state
-  const [tradMarkedIds, setTradMarkedIds] = useState<Set<number>>(new Set());
-  const [tradTime, setTradTime] = useState<number>(0);
-  const [tradTimerActive, setTradTimerActive] = useState<boolean>(false);
-  const [tradSelectedDigit, setTradSelectedDigit] = useState<number | null>(null);
-
-  // Reduccion mode state
-  const [redEliminatedIds, setRedEliminatedIds] = useState<Set<number>>(new Set());
-  const [redSelectedIds, setRedSelectedIds] = useState<number[]>([]);
-  const [redTime, setRedTime] = useState<number>(0);
-  const [redTimerActive, setRedTimerActive] = useState<boolean>(false);
-  const [redSelectedDigit, setRedSelectedDigit] = useState<number | null>(null);
-  const [selectionFeedback, setSelectionFeedback] = useState<string | null>(null);
-
-  // Score persistence for comparative mode
   const [currentScore, setCurrentScore] = useState<GameScore | null>(null);
 
+  // Tradicional Mode State
+  const [tradMarkedIds, setTradMarkedIds] = useState<Set<number>>(new Set());
+  const [tradSelectedDigit, setTradSelectedDigit] = useState<number | null>(null);
+  const [tradTime, setTradTime] = useState<number>(0);
+  const [tradTimerActive, setTradTimerActive] = useState<boolean>(false);
+  const tradTimerRef = useRef<any>(null);
+
+  // Reduccion Mode State
+  const [redEliminatedIds, setRedEliminatedIds] = useState<Set<number>>(new Set());
+  const [redSelectedIds, setRedSelectedIds] = useState<number[]>([]);
+  const [redSelectedDigit, setRedSelectedDigit] = useState<number | null>(null);
+  const [redTime, setRedTime] = useState<number>(0);
+  const [redTimerActive, setRedTimerActive] = useState<boolean>(false);
+  const [selectionFeedback, setSelectionFeedback] = useState<string | null>(null);
+  const redTimerRef = useRef<any>(null);
+
   // Modals state
-  const [isTutorialOpen, setIsTutorialOpen] = useState<boolean>(false);
-  const [isStudentHelpOpen, setIsStudentHelpOpen] = useState<boolean>(false);
-  const [isDimensionOpen, setIsDimensionOpen] = useState<boolean>(false);
-  const [isResultOpen, setIsResultOpen] = useState<boolean>(false);
-  const [isStudentFinishedOpen, setIsStudentFinishedOpen] = useState<boolean>(false);
-  const [isQrModalOpen, setIsQrModalOpen] = useState<boolean>(false);
+  const [isTutorialOpen, setIsTutorialOpen] = useState(false);
+  const [isDimensionOpen, setIsDimensionOpen] = useState(false);
+  const [isResultOpen, setIsResultOpen] = useState(false);
+  const [isStudentHelpOpen, setIsStudentHelpOpen] = useState(false);
+  const [isStudentFinishedOpen, setIsStudentFinishedOpen] = useState(false);
+  const [isQrModalOpen, setIsQrModalOpen] = useState(false);
   const [qrDataUrl, setQrDataUrl] = useState<string>('');
 
   const [resultEvaluation, setResultEvaluation] = useState<{
@@ -252,100 +240,47 @@ export default function App() {
     mode: GameMode;
   } | null>(null);
 
-  // References for timer intervals
-  const tradTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const redTimerRef = useRef<NodeJS.Timeout | null>(null);
-  const feedbackTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-
-  // Save config changes to localStorage
-  const handleUpdateClassroomConfig = (newConfig: Partial<ClassroomConfig>) => {
-    setClassroomConfig((prev) => {
-      const updated = { ...prev, ...newConfig };
-      localStorage.setItem('aula_teacher_config', JSON.stringify(updated));
-
-      // Synchronize grid dimensions if changed
-      if (newConfig.rows !== undefined || newConfig.cols !== undefined) {
-        setGridConfig({
-          rows: updated.rows,
-          cols: updated.cols,
-        });
-        initializeGrid(updated.rows, updated.cols, sessionSeed);
-      }
-
-      // Synchronize mode if changed
-      if (newConfig.studentMode && newConfig.studentMode !== 'libre') {
-        setCurrentMode(newConfig.studentMode);
-      }
-
-      return updated;
-    });
-  };
-
-  // Generate QR code link calculation
-  const studentUrl = useMemo(() => {
-    const origin = window.location.origin;
-    const pathname = window.location.pathname || '/';
+  // Generar QR para proyector si es necesario
+  useEffect(() => {
+    const origin = typeof window !== 'undefined' ? window.location.origin : '';
+    const pathname = typeof window !== 'undefined' ? (window.location.pathname || '/') : '/';
     const params = new URLSearchParams();
     params.set('role', 'alumno');
-    params.set('m', classroomConfig.studentMode);
-    params.set('r', String(classroomConfig.rows));
-    params.set('c', String(classroomConfig.cols));
-    if (classroomConfig.roundsCount > 0) {
-      params.set('rounds', String(classroomConfig.roundsCount));
-    }
-    if (classroomConfig.timeLimitSeconds > 0) {
-      params.set('limit', String(classroomConfig.timeLimitSeconds));
-    }
+    params.set('m', currentMode);
+    params.set('r', String(gridConfig.rows));
+    params.set('c', String(gridConfig.cols));
     params.set('seed', String(sessionSeed));
-    return `${origin}${pathname}?${params.toString()}`;
-  }, [classroomConfig, sessionSeed]);
+    const url = `${origin}${pathname}?${params.toString()}`;
 
-  // Generate QR Data URL
-  useEffect(() => {
-    let active = true;
-    QRCode.toDataURL(studentUrl, {
-      width: 450,
-      margin: 1.5,
-      color: { dark: '#000000', light: '#ffffff' },
-    })
-      .then((url) => {
-        if (active) setQrDataUrl(url);
-      })
-      .catch((e) => console.error('QR code generation error', e));
+    QRCode.toDataURL(url, { width: 350, margin: 1 })
+      .then((dataUri) => setQrDataUrl(dataUri))
+      .catch((err) => console.warn('QR error:', err));
+  }, [currentMode, gridConfig, sessionSeed]);
 
-    return () => {
-      active = false;
-    };
-  }, [studentUrl]);
-
-  // Initialize or generate new grid
-  const initializeGrid = (rows: number, cols: number, seedVal?: number) => {
-    const effectiveSeed = seedVal !== undefined ? seedVal : sessionSeed;
-    const cells = generateReductionGrid(rows, cols, effectiveSeed);
+  // Generate grid deterministically using sessionSeed
+  const initializeGrid = (rows: number, cols: number, seed?: number) => {
+    const s = seed !== undefined ? seed : sessionSeed;
+    const cells = generateReductionGrid(rows, cols, s);
     setGridCells(cells);
-    const sum = cells.reduce((acc, c) => acc + c.value, 0);
-    const root = calculateDigitalRoot(sum);
-
-    // Reset both modes state for this new grid
     setTradMarkedIds(new Set());
+    setTradSelectedDigit(null);
     setTradTime(0);
     setTradTimerActive(false);
-    setTradSelectedDigit(null);
 
     setRedEliminatedIds(new Set());
     setRedSelectedIds([]);
+    setRedSelectedDigit(null);
     setRedTime(0);
     setRedTimerActive(false);
-    setRedSelectedDigit(null);
     setSelectionFeedback(null);
 
-    // Update comparative score record
+    const sum = cells.reduce((acc, c) => acc + c.value, 0);
     setCurrentScore({
       timestamp: Date.now(),
       dimensions: `${rows}x${cols}`,
       traditionalTime: null,
       reductionTime: null,
-      digitalRoot: root,
+      digitalRoot: calculateDigitalRoot(sum),
       sumTotal: sum,
     });
   };
@@ -383,7 +318,7 @@ export default function App() {
     };
   }, [redTimerActive]);
 
-  // Total sum and correct digital root of the current grid
+  // Total sum and correct digital root
   const totalSum = useMemo(() => {
     return gridCells.reduce((acc, c) => acc + c.value, 0);
   }, [gridCells]);
@@ -392,41 +327,54 @@ export default function App() {
     return calculateDigitalRoot(totalSum);
   }, [totalSum]);
 
-  // Helper to check if tutorial was dismissed
-  const isTutorialHidden = (mode: GameMode) => {
-    return !!(
-      localStorage.getItem(`reduccion_hide_tutorial_${mode}`) ||
-      localStorage.getItem(`hide_tutorial_${mode}`)
-    );
-  };
+  // Sincronización en tiempo real para el Alumno cuando el profesor finaliza la dinámica
+  useEffect(() => {
+    if (!activeStudentRoom || !isStudentInGame) return;
+    const rtdb = getFirebaseRtdb();
+    if (!rtdb) return;
 
-  // Handle switching modes (keeps exact same matrix numbers)
+    const roomRef = ref(rtdb, `salas/${activeStudentRoom.roomCode}`);
+    const unsub = onValue(roomRef, (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.val();
+        // Si el profesor finalizó la dinámica para toda la sala
+        if (
+          data?.estado === 'finalizada' ||
+          data?.estado === 'finalizado' ||
+          data?.status === 'finished'
+        ) {
+          setIsResultOpen(false);
+          setIsStudentFinishedOpen(true);
+        }
+      }
+    });
+
+    return () => {
+      off(roomRef);
+    };
+  }, [activeStudentRoom, isStudentInGame]);
+
+  // Switch modes
   const handleSelectMode = (newMode: GameMode) => {
     setTradTimerActive(false);
     setRedTimerActive(false);
     setCurrentMode(newMode);
-
-    if (userRole !== 'student' && (newMode === 'tradicional' || newMode === 'reduccion')) {
-      if (!isTutorialHidden(newMode)) {
-        setIsTutorialOpen(true);
-      }
-    }
   };
 
   // Start from splash screen
   const handleStartGame = () => {
     setShowSplash(false);
-    if (!isTutorialHidden('tradicional')) {
-      setIsTutorialOpen(true);
-    }
   };
 
   // Close tutorial modal
   const handleCloseTutorial = (dontShowAgain: boolean) => {
     setIsTutorialOpen(false);
     if (dontShowAgain) {
-      localStorage.setItem(`reduccion_hide_tutorial_${currentMode}`, 'true');
-      localStorage.setItem(`hide_tutorial_${currentMode}`, 'true');
+      try {
+        localStorage.setItem(`reduccion_hide_tutorial_${currentMode}`, 'true');
+      } catch {
+        // silent
+      }
     }
   };
 
@@ -437,7 +385,7 @@ export default function App() {
     initializeGrid(rows, cols);
   };
 
-  // Reset attempt for the active mode (keeps identical matrix numbers!)
+  // Reset attempt for the active mode
   const handleResetAttempt = () => {
     if (currentMode === 'tradicional') {
       setTradTimerActive(false);
@@ -454,6 +402,18 @@ export default function App() {
     }
   };
 
+  // Reintentar cuadrícula actual tras error (cierra el modal, limpia el dígito ingresado y permite seguir operando sobre la misma cuadrícula)
+  const handleRetryCurrentGrid = () => {
+    setIsResultOpen(false);
+    if (currentMode === 'tradicional') {
+      setTradSelectedDigit(null);
+      setTradTimerActive(true);
+    } else {
+      setRedSelectedDigit(null);
+      setRedTimerActive(true);
+    }
+  };
+
   // Generate completely new grid
   const handleNewGrid = () => {
     const nextSeed = Math.floor(Math.random() * 900000) + 100000;
@@ -461,17 +421,11 @@ export default function App() {
     initializeGrid(gridConfig.rows, gridConfig.cols, nextSeed);
   };
 
-  // ================= TRADICIONAL MODE LOGIC =================
+  // Tradicional: Toggle cell
   const handleToggleTradCell = (id: number) => {
-    if (userRole !== 'student' && !isTutorialHidden('tradicional')) {
-      setIsTutorialOpen(true);
-      return;
-    }
-
-    if (!tradTimerActive && currentScore?.traditionalTime === null) {
+    if (!tradTimerActive && tradMarkedIds.size === 0) {
       setTradTimerActive(true);
     }
-
     setTradMarkedIds((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
@@ -480,83 +434,72 @@ export default function App() {
     });
   };
 
-  // ================= REDUCCION MODE LOGIC =================
+  // Reduccion: Handle cell click
   const handleReduccionCellClick = (cell: GridCell) => {
-    if (userRole !== 'student' && !isTutorialHidden('reduccion')) {
-      setIsTutorialOpen(true);
-      return;
-    }
-
-    if (!redTimerActive && currentScore?.reductionTime === null) {
+    const id = cell.id;
+    if (redEliminatedIds.has(id)) return;
+    if (!redTimerActive && redEliminatedIds.size === 0 && redSelectedIds.length === 0) {
       setRedTimerActive(true);
     }
 
-    // Rule 1: Direct 0 or 9 elimination
-    if (cell.value === 0 || cell.value === 9) {
-      setRedEliminatedIds((prev) => new Set([...prev, cell.id]));
-      setRedSelectedIds((prev) => prev.filter((id) => id !== cell.id));
+    if (cell.value === 9 || cell.value === 0) {
+      setRedEliminatedIds((prev) => new Set([...prev, id]));
+      setRedSelectedIds((prev) => prev.filter((i) => i !== id));
+      setSelectionFeedback(
+        cell.value === 9 ? '¡Nueve descartado directo!' : '¡Cero descartado!'
+      );
+      setTimeout(() => setSelectionFeedback(null), 1500);
       return;
     }
 
-    // Rule 2: Unselect if already in current active selection
-    if (redSelectedIds.includes(cell.id)) {
-      setRedSelectedIds((prev) => prev.filter((id) => id !== cell.id));
+    if (redSelectedIds.includes(id)) {
+      setRedSelectedIds((prev) => prev.filter((i) => i !== id));
+      setSelectionFeedback(null);
       return;
     }
 
-    // Rule 3: Add to selection
-    const newSelection = [...redSelectedIds, cell.id];
-    const selectedCells = gridCells.filter((c) => newSelection.includes(c.id));
-    const currentSum = selectedCells.reduce((acc, c) => acc + c.value, 0);
+    const newSelection = [...redSelectedIds, id];
+    const sum = newSelection.reduce((acc, cellId) => {
+      const c = gridCells.find((item) => item.id === cellId);
+      return acc + (c ? c.value : 0);
+    }, 0);
 
-    const reducesToNine = currentSum > 0 && currentSum % 9 === 0;
-
-    if (reducesToNine && newSelection.length >= 2) {
+    if (sum === 9) {
       setRedEliminatedIds((prev) => new Set([...prev, ...newSelection]));
       setRedSelectedIds([]);
-      showTemporaryFeedback(
-        currentSum === 9
-          ? '✓ ¡Suma 9 descartada!'
-          : `✓ ¡Suma ${currentSum} reduce a 9 y queda descartada!`
-      );
-      return;
+      setSelectionFeedback('¡Suma 9 descartada con éxito!');
+      setTimeout(() => setSelectionFeedback(null), 1500);
+    } else if (sum > 9) {
+      setRedSelectedIds([id]);
+      setSelectionFeedback('La suma superó 9. Selección reiniciada.');
+      setTimeout(() => setSelectionFeedback(null), 1500);
+    } else {
+      setRedSelectedIds(newSelection);
+      setSelectionFeedback(`Suma actual: ${sum} (faltan ${9 - sum} para 9)`);
     }
-
-    setRedSelectedIds(newSelection);
-    const currentReduced = ((currentSum - 1) % 9) + 1;
-    showTemporaryFeedback(`Suma acumulada: ${currentSum} (Reducción: ${currentReduced})...`);
   };
 
-  const showTemporaryFeedback = (msg: string) => {
-    if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current);
-    setSelectionFeedback(msg);
-    feedbackTimeoutRef.current = setTimeout(() => {
-      setSelectionFeedback(null);
-    }, 1600);
-  };
-
-  // Active sum of selected cells in Reduccion
   const selectedSumInReduccion = useMemo(() => {
-    return gridCells
-      .filter((c) => redSelectedIds.includes(c.id))
-      .reduce((acc, c) => acc + c.value, 0);
-  }, [gridCells, redSelectedIds]);
+    return redSelectedIds.reduce((acc, id) => {
+      const cell = gridCells.find((c) => c.id === id);
+      return acc + (cell ? cell.value : 0);
+    }, 0);
+  }, [redSelectedIds, gridCells]);
 
-  // ================= CHECK / COMPROBAR LOGIC =================
-  const handleCheckAnswer = () => {
+  // Check result
+  const handleCheckResult = () => {
     const isTrad = currentMode === 'tradicional';
     const userDigit = isTrad ? tradSelectedDigit : redSelectedDigit;
 
-    if (userDigit === null) return;
-
-    const time = isTrad ? tradTime : redTime;
-
-    if (isTrad) {
-      setTradTimerActive(false);
-    } else {
-      setRedTimerActive(false);
+    if (userDigit === null) {
+      alert('Por favor selecciona primero un dígito del 0 al 9 en el teclado inferior.');
+      return;
     }
 
+    if (isTrad) setTradTimerActive(false);
+    else setRedTimerActive(false);
+
+    const time = isTrad ? tradTime : redTime;
     const isCorrect =
       userDigit === correctDigitalRoot ||
       (correctDigitalRoot === 9 && userDigit === 0);
@@ -572,6 +515,56 @@ export default function App() {
       });
     }
 
+    // Sincronizar respuesta en Firebase RTDB si el alumno está conectado a una sala
+    if (activeStudentRoom && isCorrect) {
+      try {
+        const rtdb = getFirebaseRtdb();
+        if (rtdb) {
+          const currentR = studentProgress.currentRound;
+          const isLast =
+            classroomConfig.roundsCount > 0 && currentR >= classroomConfig.roundsCount;
+
+          // 1. Guardar tiempo de la ronda en salas/{idSala}/jugadores/{idJugador}/rondas/{numRonda}
+          set(
+            ref(
+              rtdb,
+              `salas/${activeStudentRoom.roomCode}/jugadores/${activeStudentRoom.playerId}/rondas/${currentR}`
+            ),
+            {
+              numRonda: currentR,
+              tiempo: time,
+              completada: true,
+              esCorrecto: true,
+              digitoUsuario: userDigit,
+              fecha: serverTimestamp(),
+            }
+          ).catch((err) => console.warn('Aviso guardando ronda en RTDB:', err));
+
+          // 2. Actualizar estado del jugador en tiempo real (preservando su nombre real)
+          update(
+            ref(
+              rtdb,
+              `salas/${activeStudentRoom.roomCode}/jugadores/${activeStudentRoom.playerId}`
+            ),
+            {
+              nombre: activeStudentRoom.playerName,
+              name: activeStudentRoom.playerName,
+              rondaActual: currentR,
+              estado: isLast ? 'terminado' : 'esperando_siguiente',
+              status: isLast ? 'finished' : 'round_finished',
+              isFinished: isLast,
+              tiempo: time,
+              esCorrecto: true,
+              digitoUsuario: userDigit,
+              ultimaActualizacion: serverTimestamp(),
+            }
+          ).catch((err) => console.warn('Aviso sincronizando en RTDB:', err));
+        }
+      } catch (err) {
+        console.warn('Error en sincronización de respuesta:', err);
+      }
+    }
+
     // Record student progress attempt
     if (userRole === 'student') {
       setStudentProgress((prev) => {
@@ -579,7 +572,9 @@ export default function App() {
           ...prev.attempts,
           {
             round: prev.currentRound,
-            mode: (currentMode === 'tradicional' ? 'tradicional' : 'reduccion') as 'tradicional' | 'reduccion',
+            mode: (currentMode === 'tradicional' ? 'tradicional' : 'reduccion') as
+              | 'tradicional'
+              | 'reduccion',
             time,
             isCorrect,
             userDigit,
@@ -607,28 +602,51 @@ export default function App() {
     setIsResultOpen(true);
   };
 
-  // Handle student progressing to the next round
+  // Siguiente ronda de alumno (avance autónomo e individual)
   const handleNextStudentRound = () => {
     setIsResultOpen(false);
-
-    if (classroomConfig.roundsCount > 0 && studentProgress.currentRound >= classroomConfig.roundsCount) {
-      // Completed all rounds
+    const currentRoundNum = studentProgress.currentRound;
+    if (classroomConfig.roundsCount > 0 && currentRoundNum >= classroomConfig.roundsCount) {
       setIsStudentFinishedOpen(true);
       return;
     }
 
-    // Next round
+    const nextRoundNum = currentRoundNum + 1;
     setStudentProgress((prev) => ({
       ...prev,
-      currentRound: prev.currentRound + 1,
+      currentRound: nextRoundNum,
     }));
 
-    // Seed next round deterministically
-    const nextSeed = sessionSeed + studentProgress.currentRound * 1007;
+    // Notificar a Firebase que el alumno comenzó la siguiente ronda
+    if (activeStudentRoom) {
+      try {
+        const rtdb = getFirebaseRtdb();
+        if (rtdb) {
+          update(
+            ref(
+              rtdb,
+              `salas/${activeStudentRoom.roomCode}/jugadores/${activeStudentRoom.playerId}`
+            ),
+            {
+              nombre: activeStudentRoom.playerName,
+              name: activeStudentRoom.playerName,
+              rondaActual: nextRoundNum,
+              ronda: nextRoundNum,
+              estado: 'jugando',
+              status: 'playing',
+              isFinished: false,
+            }
+          ).catch(() => {});
+        }
+      } catch {}
+    }
+
+    const nextSeed = sessionSeed + nextRoundNum * 1007;
     initializeGrid(gridConfig.rows, gridConfig.cols, nextSeed);
+    handleResetAttempt();
   };
 
-  // Restart student session from beginning
+  // Reiniciar sesión de alumno
   const handleRestartStudentSession = () => {
     setIsStudentFinishedOpen(false);
     setStudentProgress({
@@ -648,6 +666,7 @@ export default function App() {
     setUserRole('student');
     setIsTeacherPreviewingStudent(true);
     setIsTeacherDashboardOpen(false);
+    setIsStudentInGame(true);
     setCurrentMode(classroomConfig.studentMode === 'tradicional' ? 'tradicional' : 'reduccion');
     initializeGrid(classroomConfig.rows, classroomConfig.cols, sessionSeed);
   };
@@ -658,13 +677,68 @@ export default function App() {
     setIsTeacherDashboardOpen(false);
   };
 
-  // -------------------------------------------------------------
-  // VIEW RENDERER (Wrapped with Universal Fixed Fullscreen Button)
-  // -------------------------------------------------------------
+  // Transición cuando el alumno se conecta a una sala y el profesor inicia la dinámica
+  const handleStudentGameReady = (syncConfig: RoomSyncConfig) => {
+    setActiveStudentRoom(syncConfig);
+    setGridConfig({ rows: syncConfig.rows, cols: syncConfig.cols });
+    setClassroomConfig({
+      rows: syncConfig.rows,
+      cols: syncConfig.cols,
+      studentMode: syncConfig.modo,
+      timeLimitSeconds: syncConfig.limiteTiempo,
+      roundsCount: syncConfig.rondas,
+      allowModeSwitch: syncConfig.modo === 'libre',
+      showAssistance: true,
+    });
+    setCurrentMode(syncConfig.modo === 'tradicional' ? 'tradicional' : 'reduccion');
+    setSessionSeed(syncConfig.semilla);
+    initializeGrid(syncConfig.rows, syncConfig.cols, syncConfig.semilla);
+    setStudentProgress({
+      currentRound: syncConfig.currentRound || 1,
+      totalRounds: syncConfig.rondas,
+      completedRounds: 0,
+      correctCount: 0,
+      attempts: [],
+    });
+    setIsStudentInGame(true);
+  };
+
+  // Salir de la sala del alumno
+  const handleExitStudentRoom = () => {
+    setActiveStudentRoom(null);
+    setIsStudentInGame(false);
+    setUserRole('teacher');
+    setShowSplash(true);
+  };
+
   const isStudentView = userRole === 'student';
 
+  // RENDERIZADO DE VISTAS SEGÚN ESTADO
   const renderCurrentView = () => {
-    // VIEW 1: Teacher Dashboard (Control Panel & Multiplayer Lobby)
+    // VISTA 1: Pantalla de Bienvenida con Selector de Rol (Profesor vs Alumno)
+    if (showSplash) {
+      return (
+        <SplashIntro
+          onStartTeacher={() => {
+            setShowSplash(false);
+            setUserRole('teacher');
+            setIsTeacherDashboardOpen(true);
+          }}
+          onStartStudent={() => {
+            setShowSplash(false);
+            setUserRole('student');
+            setIsStudentInGame(false);
+          }}
+          onStartIndividual={() => {
+            setShowSplash(false);
+            setUserRole('teacher');
+            setIsTeacherDashboardOpen(false);
+          }}
+        />
+      );
+    }
+
+    // VISTA 2: Panel del Docente (Configuración -> Lobby QR -> Monitor)
     if (userRole === 'teacher' && isTeacherDashboardOpen) {
       return (
         <ErrorBoundary
@@ -685,13 +759,16 @@ export default function App() {
             }}
             onLaunchProjector={handleLaunchProjector}
             onLaunchStudentView={handlePreviewAsStudent}
-            onBackToApp={() => setIsTeacherDashboardOpen(false)}
+            onBackToApp={() => {
+              setIsTeacherDashboardOpen(false);
+              setShowSplash(true);
+            }}
           />
         </ErrorBoundary>
       );
     }
 
-    // VIEW 3: Projector View (Classroom Whiteboard)
+    // VISTA 3: Modo Proyector (Pizarra Gigante de Aula)
     if (userRole === 'projector') {
       return (
         <ProjectorView
@@ -710,272 +787,259 @@ export default function App() {
       );
     }
 
-    // VIEW 4: Interactive Board (Student or Teacher In-Game View)
+    // VISTA 4: Modo Alumno en Sala de Espera Obligatoria (antes de que el profesor inicie)
+    if (isStudentView && !isStudentInGame) {
+      return (
+        <StudentWaitingRoom
+          initialRoomCode={
+            initialUrlParams.get('sala') || initialUrlParams.get('room') || ''
+          }
+          onGameReady={handleStudentGameReady}
+          onExit={handleExitStudentRoom}
+        />
+      );
+    }
+
+    // VISTA 5: Tablero Interactivo (Alumno en Partida o Docente en Modo Tablero)
     return (
       <main className="h-full w-full max-h-[100dvh] flex flex-col justify-between overflow-hidden bg-stone-950 text-stone-100 select-none relative">
-        {/* 1. Splash Screen Overlay (Teacher/Standard mode only) */}
-        {!isStudentView && showSplash ? (
-          <SplashIntro
-            onStart={handleStartGame}
-            onStartMultiplayer={() => {
+        {/* Barra de Navegación Superior */}
+        {isStudentView ? (
+          <StudentHeader
+            currentMode={currentMode}
+            onSelectMode={
+              classroomConfig.studentMode === 'libre'
+                ? (mode) => handleSelectMode(mode)
+                : undefined
+            }
+            config={classroomConfig}
+            progress={studentProgress}
+            onOpenHelp={() => setIsStudentHelpOpen(true)}
+            onResetRound={handleResetAttempt}
+            isTimerRunning={
+              currentMode === 'tradicional' ? tradTimerActive : redTimerActive
+            }
+            elapsedSeconds={currentMode === 'tradicional' ? tradTime : redTime}
+          />
+        ) : (
+          <TopNav
+            currentMode={currentMode}
+            onSelectMode={handleSelectMode}
+            gridConfig={gridConfig}
+            onOpenDimensions={() => setIsDimensionOpen(true)}
+            onOpenTutorial={() => setIsTutorialOpen(true)}
+            onOpenSplash={() => setShowSplash(true)}
+            onOpenTeacherDashboard={() => {
               setShowSplash(false);
               setUserRole('teacher');
               setIsTeacherDashboardOpen(true);
             }}
+            onOpenProjector={handleLaunchProjector}
           />
-        ) : (
-          <>
-            {/* 2. Top Navigation Bar: Student Header vs Teacher TopNav */}
-            {isStudentView ? (
-              <StudentHeader
-                currentMode={currentMode}
-                onSelectMode={
-                  classroomConfig.studentMode === 'libre'
-                    ? (mode) => handleSelectMode(mode)
-                    : undefined
-                }
-                config={classroomConfig}
-                progress={studentProgress}
-                onOpenHelp={() => setIsStudentHelpOpen(true)}
-                onResetRound={handleResetAttempt}
-                isTimerRunning={
-                  currentMode === 'tradicional' ? tradTimerActive : redTimerActive
-                }
-                elapsedSeconds={currentMode === 'tradicional' ? tradTime : redTime}
-              />
-            ) : (
-              <TopNav
-                currentMode={currentMode}
-                onSelectMode={handleSelectMode}
-                gridConfig={gridConfig}
-                onOpenDimensions={() => setIsDimensionOpen(true)}
-                onOpenTutorial={() => setIsTutorialOpen(true)}
-                onOpenSplash={() => setShowSplash(true)}
-                onOpenTeacherDashboard={() => {
-                  setShowSplash(false);
-                  setUserRole('teacher');
-                  setIsTeacherDashboardOpen(true);
-                }}
-                onOpenProjector={handleLaunchProjector}
-              />
-            )}
+        )}
 
-          {/* Discreet floating badge when teacher is previewing student view */}
-          {isStudentView && isTeacherPreviewingStudent && (
-            <div className="bg-amber-500 text-stone-950 text-xs px-3 py-1 font-bold flex items-center justify-between shrink-0">
-              <span className="flex items-center gap-1.5">
-                <GraduationCap className="w-3.5 h-3.5" />
-                <span>Vista Previa del Alumno (Modo Docente)</span>
-              </span>
-              <button
-                onClick={() => {
-                  setUserRole('teacher');
-                  setIsTeacherDashboardOpen(true);
-                }}
-                className="px-2 py-0.5 bg-stone-900 text-white rounded text-[11px] hover:bg-stone-800 cursor-pointer"
-              >
-                Volver al Panel
-              </button>
-            </div>
-          )}
-
-          {/* 3. Sub Bar with Stopwatch & Counters (Tradicional & Reduccion) */}
-          {currentMode !== 'comparativa' && !isStudentView && (
-            <SubBar
-              mode={currentMode}
-              elapsedSeconds={currentMode === 'tradicional' ? tradTime : redTime}
-              totalCells={gridCells.length}
-              activeCount={
-                currentMode === 'tradicional'
-                  ? tradMarkedIds.size
-                  : redEliminatedIds.size
-              }
-              selectedSum={selectedSumInReduccion}
-              selectedCount={redSelectedIds.length}
-              onResetAttempt={handleResetAttempt}
-              onNewGrid={handleNewGrid}
-              isTimerRunning={
-                currentMode === 'tradicional' ? tradTimerActive : redTimerActive
-              }
-            />
-          )}
-
-          {/* 4. Main View Area (Strictly zero vertical scroll, fits 100dvh) */}
-          <div className="flex-1 w-full flex flex-col items-center justify-center overflow-hidden min-h-0">
-            {currentMode === 'tradicional' && (
-              <TradicionalBoard
-                cells={gridCells}
-                gridConfig={gridConfig}
-                markedIds={tradMarkedIds}
-                onToggleCell={handleToggleTradCell}
-              />
-            )}
-
-            {currentMode === 'reduccion' && (
-              <ReduccionBoard
-                cells={gridCells}
-                gridConfig={gridConfig}
-                eliminatedIds={redEliminatedIds}
-                selectedIds={redSelectedIds}
-                onCellClick={handleReduccionCellClick}
-                selectionErrorMsg={selectionFeedback}
-                onClearSelection={() => setRedSelectedIds([])}
-              />
-            )}
-
-            {currentMode === 'comparativa' && (
-              <ComparativaView
-                lastScore={currentScore}
-                onGoToMode={handleSelectMode}
-                onNewChallenge={handleNewGrid}
-              />
-            )}
+        {/* Banner discreto si el docente está en vista previa de alumno */}
+        {isStudentView && isTeacherPreviewingStudent && (
+          <div className="bg-amber-500 text-stone-950 text-xs px-3 py-1 font-bold flex items-center justify-between shrink-0">
+            <span className="flex items-center gap-1.5">
+              <GraduationCap className="w-3.5 h-3.5" />
+              <span>Vista Previa del Alumno (Modo Docente)</span>
+            </span>
+            <button
+              onClick={() => {
+                setUserRole('teacher');
+                setIsTeacherDashboardOpen(true);
+                setIsStudentInGame(false);
+              }}
+              className="px-2 py-0.5 bg-stone-900 text-white rounded text-[11px] hover:bg-stone-800 cursor-pointer"
+            >
+              Volver al Panel
+            </button>
           </div>
+        )}
 
-          {/* 5. Mobile-Shielded Tactile Keypad Bar (0-9) - Only in game modes */}
-          {currentMode !== 'comparativa' && (
-            <KeypadBar
-              selectedDigit={
-                currentMode === 'tradicional'
-                  ? tradSelectedDigit
-                  : redSelectedDigit
-              }
-              onSelectDigit={(digit) => {
-                if (currentMode === 'tradicional') {
-                  setTradSelectedDigit(digit);
-                } else {
-                  setRedSelectedDigit(digit);
-                }
-              }}
-              onClearDigit={() => {
-                if (currentMode === 'tradicional') {
-                  setTradSelectedDigit(null);
-                } else {
-                  setRedSelectedDigit(null);
-                }
-              }}
-              onCheck={handleCheckAnswer}
-              isCheckingDisabled={
-                (currentMode === 'tradicional' && tradSelectedDigit === null) ||
-                (currentMode === 'reduccion' && redSelectedDigit === null)
-              }
-              activeMode={currentMode as 'tradicional' | 'reduccion'}
+        {/* SubBar con Temporizador y Contadores para Modo Individual/Docente */}
+        {currentMode !== 'comparativa' && !isStudentView && (
+          <SubBar
+            mode={currentMode}
+            elapsedSeconds={currentMode === 'tradicional' ? tradTime : redTime}
+            totalCells={gridCells.length}
+            activeCount={
+              currentMode === 'tradicional'
+                ? tradMarkedIds.size
+                : redEliminatedIds.size
+            }
+            selectedSum={selectedSumInReduccion}
+            selectedCount={redSelectedIds.length}
+            onResetAttempt={handleResetAttempt}
+            onNewGrid={handleNewGrid}
+            isTimerRunning={
+              currentMode === 'tradicional' ? tradTimerActive : redTimerActive
+            }
+          />
+        )}
+
+        {/* Tablero Principal Centrado (0 scroll vertical) */}
+        <div className="flex-1 w-full flex flex-col items-center justify-center overflow-hidden min-h-0">
+          {currentMode === 'tradicional' && (
+            <TradicionalBoard
+              cells={gridCells}
+              gridConfig={gridConfig}
+              markedIds={tradMarkedIds}
+              onToggleCell={handleToggleTradCell}
             />
           )}
-        </>
-      )}
 
-      {/* 6. Modals */}
-      <TutorialModal
-        mode={currentMode}
-        isOpen={isTutorialOpen}
-        onClose={handleCloseTutorial}
-      />
+          {currentMode === 'reduccion' && (
+            <ReduccionBoard
+              cells={gridCells}
+              gridConfig={gridConfig}
+              eliminatedIds={redEliminatedIds}
+              selectedIds={redSelectedIds}
+              onCellClick={handleReduccionCellClick}
+              selectionErrorMsg={selectionFeedback}
+              onClearSelection={() => setRedSelectedIds([])}
+            />
+          )}
 
-      {/* Student Quick Help Modal */}
-      <StudentHelpModal
-        isOpen={isStudentHelpOpen}
-        onClose={() => setIsStudentHelpOpen(false)}
-        activeMode={currentMode === 'tradicional' ? 'tradicional' : 'reduccion'}
-      />
+          {currentMode === 'comparativa' && (
+            <ComparativaView
+              lastScore={currentScore}
+              onGoToMode={handleSelectMode}
+              onNewChallenge={handleNewGrid}
+            />
+          )}
+        </div>
 
-      {/* Student Finished Session Modal */}
-      <StudentFinishedModal
-        isOpen={isStudentFinishedOpen}
-        progress={studentProgress}
-        config={classroomConfig}
-        onRestartSession={handleRestartStudentSession}
-      />
+        {/* Teclado Táctil Inferior (0-9) */}
+        {currentMode !== 'comparativa' && (
+          <KeypadBar
+            selectedDigit={
+              currentMode === 'tradicional'
+                ? tradSelectedDigit
+                : redSelectedDigit
+            }
+            onSelectDigit={(digit) => {
+              if (currentMode === 'tradicional') {
+                setTradSelectedDigit(digit);
+              } else {
+                setRedSelectedDigit(digit);
+              }
+            }}
+            onClearDigit={() => {
+              if (currentMode === 'tradicional') {
+                setTradSelectedDigit(null);
+              } else {
+                setRedSelectedDigit(null);
+              }
+            }}
+            onCheck={handleCheckResult}
+            activeMode={currentMode === 'tradicional' ? 'tradicional' : 'reduccion'}
+          />
+        )}
 
-      <DimensionModal
-        isOpen={isDimensionOpen}
-        currentConfig={gridConfig}
-        onSelectDimension={handleSelectDimension}
-        onClose={() => setIsDimensionOpen(false)}
-      />
+        {/* Modales Interactivos */}
+        <TutorialModal
+          isOpen={isTutorialOpen}
+          mode={currentMode}
+          onClose={handleCloseTutorial}
+        />
 
-      {/* Result Modal with Classroom Round support */}
-      {resultEvaluation && (
-        <ResultModal
-          isOpen={isResultOpen}
-          isCorrect={resultEvaluation.isCorrect}
-          userDigit={resultEvaluation.userDigit}
-          correctRoot={resultEvaluation.correctRoot}
-          totalSum={resultEvaluation.totalSum}
-          elapsedSeconds={resultEvaluation.elapsedSeconds}
-          mode={resultEvaluation.mode}
-          onRetryAttempt={() => {
-            setIsResultOpen(false);
-            handleResetAttempt();
-          }}
-          onGoToOtherMode={() => {
-            setIsResultOpen(false);
-            const other =
-              resultEvaluation.mode === 'tradicional'
-                ? 'reduccion'
-                : 'tradicional';
-            handleSelectMode(other);
-          }}
-          onGoToComparativa={() => {
-            setIsResultOpen(false);
-            handleSelectMode('comparativa');
-          }}
-          onNewGrid={() => {
-            setIsResultOpen(false);
-            handleNewGrid();
-          }}
-          onClose={() => setIsResultOpen(false)}
-          roundInfo={
-            isStudentView && classroomConfig.roundsCount > 0
-              ? {
-                  current: studentProgress.currentRound,
-                  total: classroomConfig.roundsCount,
-                  isLastRound:
-                    studentProgress.currentRound >= classroomConfig.roundsCount,
-                  onNextRound: handleNextStudentRound,
+        <DimensionModal
+          isOpen={isDimensionOpen}
+          currentConfig={gridConfig}
+          onSelectDimension={handleSelectDimension}
+          onClose={() => setIsDimensionOpen(false)}
+        />
+
+        <StudentHelpModal
+          isOpen={isStudentHelpOpen}
+          activeMode={currentMode === 'tradicional' ? 'tradicional' : 'reduccion'}
+          onClose={() => setIsStudentHelpOpen(false)}
+        />
+
+        {resultEvaluation && (
+          <ResultModal
+            isOpen={isResultOpen}
+            isCorrect={resultEvaluation.isCorrect}
+            userDigit={resultEvaluation.userDigit}
+            correctRoot={resultEvaluation.correctRoot}
+            totalSum={resultEvaluation.totalSum}
+            elapsedSeconds={resultEvaluation.elapsedSeconds}
+            mode={resultEvaluation.mode}
+            onClose={() => setIsResultOpen(false)}
+            onRetryAttempt={handleRetryCurrentGrid}
+            onGoToOtherMode={() =>
+              handleSelectMode(currentMode === 'tradicional' ? 'reduccion' : 'tradicional')
+            }
+            onGoToComparativa={() => handleSelectMode('comparativa')}
+            onNewGrid={handleNewGrid}
+            roundInfo={
+              isStudentView
+                ? {
+                    current: studentProgress.currentRound,
+                    total: classroomConfig.roundsCount,
+                    isLastRound:
+                      studentProgress.currentRound >= classroomConfig.roundsCount,
+                    onNextRound: handleNextStudentRound,
+                  }
+                : null
+            }
+          />
+        )}
+
+        {/* Modal de Alumno Finalizado */}
+        <StudentFinishedModal
+          isOpen={isStudentFinishedOpen}
+          progress={studentProgress}
+          config={classroomConfig}
+          onRestartSession={
+            activeStudentRoom
+              ? () => {
+                  setIsStudentFinishedOpen(false);
+                  handleExitStudentRoom();
                 }
-              : null
+              : handleRestartStudentSession
           }
         />
-      )}
 
-      {/* QR Modal for Projection */}
-      {isQrModalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md select-none"
-          onClick={() => setIsQrModalOpen(false)}
-        >
+        {/* Modal QR para Proyección rápida */}
+        {isQrModalOpen && (
           <div
-            className="w-full max-w-sm bg-stone-900 border border-stone-700 rounded-3xl p-6 flex flex-col items-center gap-4 text-center shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
+            className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/90 backdrop-blur-md select-none"
+            onClick={() => setIsQrModalOpen(false)}
           >
-            <div className="flex items-center justify-between w-full">
-              <span className="font-bold text-base text-white">
-                Código QR para el Aula
-              </span>
-              <button
-                onClick={() => setIsQrModalOpen(false)}
-                className="p-1 rounded-lg text-stone-400 hover:text-white"
-              >
-                <X className="w-5 h-5" />
-              </button>
+            <div
+              className="w-full max-w-sm bg-stone-900 border border-stone-700 rounded-3xl p-6 flex flex-col items-center gap-4 text-center shadow-2xl"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between w-full">
+                <span className="font-bold text-base text-white">
+                  Código QR para el Aula
+                </span>
+                <button
+                  onClick={() => setIsQrModalOpen(false)}
+                  className="p-1 rounded-lg text-stone-400 hover:text-white cursor-pointer"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+              <div className="bg-white p-3 rounded-2xl shadow-xl w-60 h-60 flex items-center justify-center">
+                {qrDataUrl && (
+                  <img
+                    src={qrDataUrl}
+                    alt="QR Alumnos"
+                    className="w-full h-full object-contain"
+                  />
+                )}
+              </div>
+              <p className="text-xs text-stone-300">
+                Escanea con tu teléfono para comenzar de inmediato
+              </p>
             </div>
-            <div className="bg-white p-3 rounded-2xl shadow-xl w-60 h-60 flex items-center justify-center">
-              {qrDataUrl && (
-                <img
-                  src={qrDataUrl}
-                  alt="QR Alumnos"
-                  className="w-full h-full object-contain"
-                />
-              )}
-            </div>
-            <p className="text-xs text-stone-300">
-              Escanea con tu teléfono para comenzar de inmediato
-            </p>
           </div>
-        </div>
-      )}
-    </main>
+        )}
+      </main>
     );
   };
 
@@ -986,7 +1050,7 @@ export default function App() {
         id="btn-universal-fullscreen"
         onClick={handleToggleFullscreen}
         aria-label="Alternar Pantalla Completa"
-        title={isFullscreen ? "Salir de pantalla completa" : "Pantalla completa"}
+        title={isFullscreen ? 'Salir de pantalla completa' : 'Pantalla completa'}
         style={{ position: 'fixed', top: '14px', right: '14px', zIndex: 99999 }}
         className="w-10 h-10 rounded-xl bg-stone-900/85 hover:bg-stone-800/95 text-stone-300 hover:text-white border border-stone-700/60 shadow-2xl backdrop-blur-md transition-all flex items-center justify-center cursor-pointer select-none"
       >
@@ -997,27 +1061,17 @@ export default function App() {
         )}
       </button>
 
-      {/* PANTALLA MODAL DE VALIDACIÓN Y ACCESO (Oculta si es alumno o si ya está autorizado) */}
-      {!isStudentException && !isAuthorized && (
-        <AuthModal onSuccess={handleAuthSuccess} />
-      )}
-
-      {/* CONTENEDOR PRINCIPAL DEL JUEGO: Permanece completamente oculto hasta que se confirme la autorización */}
+      {/* CONTENEDOR PRINCIPAL: Siempre visible */}
       <div
         id="app-main-content-wrapper"
-        className={`h-full w-full flex flex-col overflow-hidden ${
-          !isAuthorized && !isStudentException ? 'hidden' : 'flex'
-        }`}
-        style={{
-          display: (!isAuthorized && !isStudentException) ? 'none' : undefined,
-        }}
+        className="h-full w-full flex flex-col overflow-hidden"
       >
-        {/* Barra superior discreta en la vista autorizada con la sesión activa y botón Cerrar sesión */}
-        {isAuthorized && !isStudentException && (
+        {/* Barra superior si hay sesión activa de docente */}
+        {sessionData && (
           <ActiveSessionBar session={sessionData} onLogout={handleLogout} />
         )}
 
-        {/* Contenedor del juego */}
+        {/* Contenedor de la vista actual */}
         <div className="flex-1 w-full overflow-hidden relative">
           <ErrorBoundary fallbackTitle="Error al mostrar la vista solicitada">
             {renderCurrentView()}

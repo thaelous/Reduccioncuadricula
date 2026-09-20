@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { CheckCircle2, XCircle, Clock, Zap, ArrowRight, RotateCcw, Trophy } from 'lucide-react';
 import { GameMode } from '../types';
 import { getDigitalRootSteps } from '../utils/mathUtils';
@@ -42,6 +42,29 @@ export const ResultModal: React.FC<ResultModalProps> = ({
   if (!isOpen) return null;
 
   const { steps } = getDigitalRootSteps(totalSum);
+  const [countdown, setCountdown] = useState<number | null>(null);
+
+  // Transición automática de ronda para el alumno cuando es correcta
+  useEffect(() => {
+    if (!isOpen || !roundInfo || !isCorrect || roundInfo.isLastRound) {
+      setCountdown(null);
+      return;
+    }
+
+    setCountdown(2);
+    const interval = setInterval(() => {
+      setCountdown((prev) => {
+        if (prev === null || prev <= 1) {
+          clearInterval(interval);
+          roundInfo.onNextRound();
+          return null;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [isOpen, roundInfo, isCorrect]);
 
   return (
     <div
@@ -93,106 +116,118 @@ export const ResultModal: React.FC<ResultModalProps> = ({
               <div className="text-lg font-bold font-mono">
                 <span className={isCorrect ? 'text-emerald-400' : 'text-red-400'}>
                   {userDigit}
-                </span>{' '}
-                <span className="text-xs text-stone-500 font-normal">
-                  (Real: {correctRoot})
                 </span>
               </div>
             </div>
           </div>
         </div>
 
-        {/* Step by step mathematical verification */}
-        <div className="bg-stone-800/60 border border-stone-700/60 rounded-xl p-3.5 space-y-2 text-xs">
-          <div className="text-amber-400 font-semibold flex items-center justify-between">
-            <span>Verificación Matemática:</span>
-            <span className="font-mono text-stone-300">Suma Total = {totalSum}</span>
+        {/* Mensaje de aliento pedagógico solo en caso de error */}
+        {!isCorrect && (
+          <div className="bg-amber-500/10 border border-amber-500/25 rounded-xl p-3.5 text-center text-xs text-stone-300 space-y-1">
+            <p className="font-extrabold text-sm text-amber-300">¡Casi!</p>
+            <p className="leading-relaxed">Vuelve a revisar tus sumas y descartes en la cuadrícula.</p>
           </div>
+        )}
 
-          <div className="space-y-1 font-mono text-stone-300 bg-stone-900/80 p-2.5 rounded-lg border border-stone-800">
-            {steps.map((step, idx) => (
-              <div key={idx} className="flex items-center gap-1.5">
-                <span className="text-amber-500 font-bold">↳</span>
-                <span>{step}</span>
-              </div>
-            ))}
-            <div className="pt-1 text-emerald-300 font-bold flex items-center gap-1.5 border-t border-stone-800 mt-1">
-              <span>★</span>
-              <span>Número Reducido = {correctRoot} {correctRoot === 9 ? '(o 0 en mod 9)' : ''}</span>
+        {/* Desglose de Verificación Matemática SOLO cuando la respuesta es correcta */}
+        {isCorrect && (
+          <div className="bg-stone-800/60 border border-stone-700/60 rounded-xl p-3.5 space-y-2 text-xs">
+            <div className="text-amber-400 font-semibold flex items-center justify-between">
+              <span>Verificación Matemática:</span>
+              <span className="font-mono text-stone-300">Suma Total = {totalSum}</span>
             </div>
-          </div>
 
-          {mode === 'reduccion' && (
-            <p className="text-[11px] text-stone-400 italic">
-              Con el método de descarte, eliminar los 9s y grupos que sumen 9 deja únicamente los residuos cuya suma produce exactamente el mismo número reducido sin tener que sumar toda la cuadrícula.
-            </p>
-          )}
-        </div>
+            <div className="space-y-1 font-mono text-stone-300 bg-stone-900/80 p-2.5 rounded-lg border border-stone-800">
+              {steps.map((step, idx) => (
+                <div key={idx} className="flex items-center gap-1.5">
+                  <span className="text-amber-500 font-bold">↳</span>
+                  <span>{step}</span>
+                </div>
+              ))}
+              <div className="pt-1 text-emerald-300 font-bold flex items-center gap-1.5 border-t border-stone-800 mt-1">
+                <span>★</span>
+                <span>Número Reducido = {correctRoot} {correctRoot === 9 ? '(o 0 en mod 9)' : ''}</span>
+              </div>
+            </div>
+
+            {mode === 'reduccion' && (
+              <p className="text-[11px] text-stone-400 italic">
+                Con el método de descarte, eliminar los 9s y grupos que sumen 9 deja únicamente los residuos cuya suma produce exactamente el mismo número reducido sin tener que sumar toda la cuadrícula.
+              </p>
+            )}
+          </div>
+        )}
 
         {/* Action buttons */}
         <div className="space-y-2 pt-1">
-          {roundInfo && isCorrect ? (
-            <button
-              id="btn-result-next-round"
-              onClick={roundInfo.onNextRound}
-              className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-stone-950 font-extrabold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-lg shadow-amber-500/20"
-            >
-              <span>
-                {roundInfo.isLastRound
-                  ? 'Ver Resumen de la Sesión'
-                  : `Avanzar a Ronda ${roundInfo.current + 1} de ${roundInfo.total}`}
-              </span>
-              <ArrowRight className="w-4 h-4" />
-            </button>
-          ) : isCorrect ? (
-            <>
-              {mode === 'reduccion' && (
-                <button
-                  id="btn-result-other-mode"
-                  onClick={onGoToOtherMode}
-                  className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-colors"
-                >
-                  <span>Comparar con Modo Tradicional</span>
-                  <ArrowRight className="w-4 h-4" />
-                </button>
-              )}
-
+          {isCorrect ? (
+            roundInfo ? (
               <button
-                id="btn-result-comparativa"
-                onClick={onGoToComparativa}
-                className="w-full py-2 bg-stone-800 hover:bg-stone-700 text-stone-200 font-semibold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer border border-stone-700 transition-colors"
+                id="btn-result-next-round"
+                onClick={roundInfo.onNextRound}
+                className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-stone-950 font-extrabold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-lg shadow-amber-500/20"
               >
-                <Trophy className="w-4 h-4 text-amber-400" />
-                <span>Ver Tabla Comparativa</span>
+                <span>
+                  {roundInfo.isLastRound
+                    ? 'Ver Resumen de la Sesión'
+                    : countdown !== null
+                    ? `Avanzar a Ronda ${roundInfo.current + 1} (${countdown}s)`
+                    : `Avanzar a Ronda ${roundInfo.current + 1} de ${roundInfo.total}`}
+                </span>
+                <ArrowRight className="w-4 h-4" />
               </button>
-            </>
+            ) : (
+              <>
+                {mode === 'reduccion' && (
+                  <button
+                    id="btn-result-other-mode"
+                    onClick={onGoToOtherMode}
+                    className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                  >
+                    <span>Comparar con Modo Tradicional</span>
+                    <ArrowRight className="w-4 h-4" />
+                  </button>
+                )}
+
+                <button
+                  id="btn-result-comparativa"
+                  onClick={onGoToComparativa}
+                  className="w-full py-2 bg-stone-800 hover:bg-stone-700 text-stone-200 font-semibold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer border border-stone-700 transition-colors"
+                >
+                  <Trophy className="w-4 h-4 text-amber-400" />
+                  <span>Ver Tabla Comparativa</span>
+                </button>
+
+                <div className="flex gap-2 pt-1">
+                  <button
+                    id="btn-result-new-grid"
+                    onClick={onNewGrid}
+                    className="flex-1 py-2 bg-stone-800 hover:bg-stone-700 text-stone-300 font-medium rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer border border-stone-700"
+                  >
+                    <span>Nueva Cuadrícula</span>
+                  </button>
+                  <button
+                    id="btn-result-close"
+                    onClick={onClose}
+                    className="px-4 py-2 bg-stone-800 hover:bg-stone-700 text-stone-400 hover:text-stone-200 font-medium rounded-xl text-xs cursor-pointer border border-stone-700"
+                  >
+                    Cerrar
+                  </button>
+                </div>
+              </>
+            )
           ) : (
+            /* ÚNICO BOTÓN PRINCIPAL DE ACCIÓN CUANDO ES INCORRECTA */
             <button
               id="btn-result-retry"
               onClick={onRetryAttempt}
-              className="w-full py-2.5 bg-amber-500 hover:bg-amber-400 text-stone-950 font-bold rounded-xl text-xs sm:text-sm flex items-center justify-center gap-2 cursor-pointer transition-colors"
+              className="w-full py-3 bg-amber-500 hover:bg-amber-400 text-stone-950 font-extrabold rounded-xl text-sm flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-lg shadow-amber-500/20"
             >
-              <RotateCcw className="w-4 h-4" />
-              <span>Reintentar esta cuadrícula</span>
+              <RotateCcw className="w-4 h-4 stroke-[2.5]" />
+              <span>Volver a intentarlo</span>
             </button>
           )}
-
-          <div className="flex gap-2">
-            <button
-              id="btn-result-new-grid"
-              onClick={onNewGrid}
-              className="flex-1 py-2 bg-stone-800 hover:bg-stone-700 text-stone-300 font-medium rounded-xl text-xs flex items-center justify-center gap-1.5 cursor-pointer border border-stone-700"
-            >
-              <span>Nueva Cuadrícula</span>
-            </button>
-            <button
-              id="btn-result-close"
-              onClick={onClose}
-              className="px-4 py-2 bg-stone-800 hover:bg-stone-700 text-stone-400 hover:text-stone-200 font-medium rounded-xl text-xs cursor-pointer border border-stone-700"
-            >
-              Cerrar
-            </button>
-          </div>
         </div>
       </div>
     </div>
