@@ -103,14 +103,14 @@ export const SplashIntro: React.FC<SplashIntroProps> = ({
             <span>Unirse a una sala como Alumno</span>
           </button>
 
-          {/* Enlace sutil: Practicar en Solitario */}
+          {/* Enlace destacado: Practicar en Solitario (Modo Individual) */}
           {onStartIndividual && (
             <button
               id="btn-role-individual"
               onClick={onStartIndividual}
-              className="mt-1 text-xs text-stone-400 hover:text-stone-200 py-1 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+              className="btn-modo-individual mt-3 py-1.5 px-3 flex items-center justify-center gap-2 cursor-pointer select-none"
             >
-              <Play className="w-3.5 h-3.5 text-stone-400" />
+              <Play className="w-4 h-4 text-amber-300 stroke-[2.5] shrink-0" />
               <span>O practicar en solitario (Modo Individual)</span>
             </button>
           )}
